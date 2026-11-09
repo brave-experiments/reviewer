@@ -1,0 +1,302 @@
+#!/bin/bash
+# Shared config loader for brave-dev-loop shell scripts.
+#
+# Usage (from any script):
+#   source "$(dirname "${BASH_SOURCE[0]}")/lib/load-config.sh"
+#
+# Exports:
+#   BOT_PROJECT_NAME, BOT_ORG, BOT_PR_REPO, BOT_ISSUE_REPO,
+#   BOT_DEFAULT_BRANCH, BOT_USERNAME, BOT_EMAIL,
+#   BOT_PROFILE, BOT_PROFILE_DIR, BOT_PROFILE_WORKTREES, BOT_MAX_CONCURRENT_RUNS,
+#   BOT_CONCURRENT_JOBS,
+#   BOT_SSH_KEY_PATH, BOT_GH_ACCOUNT,
+#   BOT_REVIEWER_USERNAME, BOT_REVIEWER_GH_CONFIG_DIR, BOT_REVIEW_USERNAME,
+#   BOT_REVIEW_MAX_ROUNDS, BOT_REVIEW_WAIT_MINUTES,
+#   BOT_AGENT, BOT_CLAUDE_MODEL, BOT_CLAUDE_BIN,
+#   BOT_REVIEW_AGENT (reviewer.agent: claude | bravebot; the agent scheduled reviews run),
+#   BOT_CODEX_MODEL, BOT_CODEX_BIN,
+#   BOT_CURSOR_MODEL, BOT_CURSOR_BIN,
+#   BOT_BRAVEBOT_MODEL, BOT_BRAVEBOT_BIN, BOT_BP_DOCS_DIR,
+#   BOT_TARGET_REPO_DIR (absolute; prefer over the raw BOT_TARGET_REPO_PATH)
+#
+# Also provides:
+#   bot_config '.some.jq.path'  — raw jq query against the config file
+
+BOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+BOT_CONFIG_FILE="$BOT_DIR/config.json"
+if [ ! -f "$BOT_CONFIG_FILE" ]; then
+  BOT_CONFIG_FILE="$BOT_DIR/config.example.json"
+fi
+
+if [ ! -f "$BOT_CONFIG_FILE" ]; then
+  echo "Error: No config.json or config.example.json found in $BOT_DIR" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
+bot_config() {
+  jq -r "$1 // empty" "$BOT_CONFIG_FILE"
+}
+
+# Boolean-safe read. jq's `//` yields the right-hand side when the left is
+# null *or false*, so bot_config on a `false` value returns empty and every
+# caller falls through to its default — silently inverting the setting.
+# Prints "true"/"false", or nothing when the key is genuinely absent.
+bot_config_bool() {
+  jq -r "if $1 == null then empty else ($1 | tostring) end" "$BOT_CONFIG_FILE"
+}
+
+# Resolve bestPractices.docsDir to an absolute directory. Stored relative to
+# the bot dir, but the same base ambiguity that affects targetRepoPath has
+# produced parent-relative values in the wild, so both bases are tried.
+resolve_docs_dir() {
+  local path="$1"
+  [ -z "$path" ] && return 0
+
+  if [[ "$path" = /* ]]; then
+    printf '%s\n' "$path"
+    return 0
+  fi
+
+  local bot_base parent_base
+  bot_base="$BOT_DIR/$path"
+  parent_base="$(dirname "$BOT_DIR")/$path"
+
+  if [ -d "$bot_base" ]; then
+    (cd "$bot_base" && pwd)
+  elif [ -d "$parent_base" ]; then
+    (cd "$parent_base" && pwd)
+  else
+    printf '%s\n' "$bot_base"
+  fi
+}
+
+# Resolve project.targetRepoPath to an absolute directory.
+#
+# The setup wizard documents this path as relative to the bot directory, but
+# config.brave-core.json (and every deployment seeded from it) stores a value
+# relative to the bot directory's *parent* — "src/brave", not "../src/brave".
+# Both spellings are in the wild, so try both bases and use whichever one is
+# actually a git repo. Absolute paths are used as-is.
+resolve_target_repo() {
+  local path="$1"
+  [ -z "$path" ] && return 0
+
+  if [[ "$path" = /* ]]; then
+    printf '%s\n' "$path"
+    return 0
+  fi
+
+  local bot_base parent_base
+  bot_base="$BOT_DIR/$path"
+  parent_base="$(dirname "$BOT_DIR")/$path"
+
+  if [ -e "$bot_base/.git" ]; then
+    (cd "$bot_base" && pwd)
+  elif [ -e "$parent_base/.git" ]; then
+    (cd "$parent_base" && pwd)
+  else
+    # Neither exists — return the documented base so errors name a sane path.
+    printf '%s\n' "$bot_base"
+  fi
+}
+
+BOT_PROJECT_NAME=$(bot_config '.project.name')
+BOT_ORG=$(bot_config '.project.org')
+BOT_PR_REPO=$(bot_config '.project.prRepository')
+BOT_ISSUE_REPO=$(bot_config '.project.issueRepository')
+BOT_DEFAULT_BRANCH=$(bot_config '.project.defaultBranch')
+BOT_TARGET_REPO_PATH=$(bot_config '.project.targetRepoPath')
+# 'curated' (default) — stories are authored and the PRD is the source of
+# truth. 'auto' — the PRD is a cache the bot refreshes from GitHub itself.
+BOT_PRD_MODE=$(bot_config '.project.prdMode')
+BOT_PRD_MODE="${BOT_PRD_MODE:-curated}"
+# Absent project.profile means a deployment predating profiles — all brave-core.
+BOT_PROFILE_CONFIGURED=$(bot_config '.project.profile')
+BOT_PROFILE="${BOT_PROFILE_CONFIGURED:-brave-core}"
+BOT_PROFILE_DIR="$BOT_DIR/projects/$BOT_PROFILE"
+
+# A profile directory named after the project is that project's profile. When
+# one exists and the config still carries a value nobody chose — the wizard's
+# "default", or nothing at all — the profile was never picked, and every story
+# then runs under generic validations, misses the project's worktree rules, and
+# is pointed at a projects/<profile>/docs that does not exist. Nothing about
+# that fails; the work just comes out wrong, so it is worth stopping over.
+#
+# Mirrors profile_mismatch() in load_config.py — keep the two in sync.
+BOT_PROFILE_FOR_PROJECT=""
+if [ -n "$BOT_PROJECT_NAME" ] &&
+   [ "$BOT_PROFILE" != "$BOT_PROJECT_NAME" ] &&
+   { [ -z "$BOT_PROFILE_CONFIGURED" ] || [ "$BOT_PROFILE_CONFIGURED" = "default" ]; } &&
+   [ -f "$BOT_DIR/projects/$BOT_PROJECT_NAME/profile.json" ]; then
+  BOT_PROFILE_FOR_PROJECT="$BOT_PROJECT_NAME"
+fi
+
+# Says what is wrong and what to change, once, for every caller that reports it.
+# 0 = a mismatch was printed on stdout, 1 = the profile is fine.
+bot_profile_mismatch() {
+  [ -n "$BOT_PROFILE_FOR_PROJECT" ] || return 1
+  if [ -z "$BOT_PROFILE_CONFIGURED" ]; then
+    echo "config.json sets no project.profile, so it defaults to '$BOT_PROFILE' — but projects/$BOT_PROFILE_FOR_PROJECT/ exists and is $BOT_PROJECT_NAME's profile."
+  else
+    echo "config.json sets project.profile to '$BOT_PROFILE_CONFIGURED' — but projects/$BOT_PROFILE_FOR_PROJECT/ exists and is $BOT_PROJECT_NAME's profile."
+  fi
+  echo "  Under '$BOT_PROFILE' every story gets that profile's validations and docs, not $BOT_PROJECT_NAME's."
+  echo "  Set \"profile\": \"$BOT_PROFILE_FOR_PROJECT\" under \"project\" in config.json."
+  return 0
+}
+
+# How many run.sh instances may share this bot directory. See docs/concurrent-runs.md.
+# Default 1: a deployment that never sets it behaves exactly as it did before
+# slots existed, down to the file paths it uses.
+BOT_MAX_CONCURRENT_RUNS=$(bot_config '.bot.maxConcurrentRuns')
+BOT_MAX_CONCURRENT_RUNS="${BOT_MAX_CONCURRENT_RUNS:-1}"
+
+# How many runs one ./run.sh starts in parallel, each on a slot of its own. Default
+# 1: an invocation is one run, as it has always been. See lib/parallel-jobs.sh.
+BOT_CONCURRENT_JOBS=$(bot_config '.bot.concurrentJobs')
+BOT_CONCURRENT_JOBS="${BOT_CONCURRENT_JOBS:-1}"
+
+# Whether this profile gives every story its own git worktree. Concurrency is
+# only sound when it does: without worktrees two runs share one working tree
+# and one branch, and they will overwrite each other's work.
+BOT_PROFILE_WORKTREES=false
+if [ -f "$BOT_PROFILE_DIR/profile.json" ]; then
+  if [ "$(jq -r '.worktrees // false' "$BOT_PROFILE_DIR/profile.json" 2>/dev/null)" = "true" ]; then
+    BOT_PROFILE_WORKTREES=true
+  fi
+fi
+
+BOT_USERNAME=$(bot_config '.bot.username')
+BOT_EMAIL=$(bot_config '.bot.email')
+BOT_SSH_KEY_PATH=$(bot_config '.bot.sshKeyPath')
+# null means: sign with the same key the bot pushes with.
+BOT_SIGNING_KEY_PATH=$(bot_config '.bot.signingKeyPath')
+BOT_GH_ACCOUNT=$(bot_config '.bot.ghAccount')
+BOT_GH_CONFIG_DIR=$(bot_config '.bot.ghConfigDir')
+
+# The second account scheduled /review-prs jobs run as (scripts/as-reviewer.sh).
+# Empty means there is none and those jobs run as the bot. Its gh login lives in
+# a config directory of its own, under ~/.config unless config.json says
+# otherwise, so it never enters the bot's or the machine owner's gh config.
+BOT_REVIEWER_USERNAME=$(bot_config '.reviewer.username')
+BOT_REVIEWER_GH_CONFIG_DIR=$(bot_config '.reviewer.ghConfigDir')
+if [ -n "$BOT_REVIEWER_USERNAME" ] && [ -z "$BOT_REVIEWER_GH_CONFIG_DIR" ]; then
+  BOT_REVIEWER_GH_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gh-$BOT_REVIEWER_USERNAME"
+fi
+# The login the review-request queue is asked about: whoever reviews.
+BOT_REVIEW_USERNAME="${BOT_REVIEWER_USERNAME:-$BOT_USERNAME}"
+# What run.sh does once a story's pull request has a new head and a reviewer is
+# configured: wait for that reviewer's verdict, answer a request for changes,
+# and wait again, at most this many reviews per story (0 turns the wait off),
+# each waited on for at most this many minutes. See scripts/lib/review-gate.sh.
+BOT_REVIEW_MAX_ROUNDS=$(bot_config '.reviewer.maxRounds')
+BOT_REVIEW_MAX_ROUNDS="${BOT_REVIEW_MAX_ROUNDS:-5}"
+BOT_REVIEW_WAIT_MINUTES=$(bot_config '.reviewer.waitMinutes')
+BOT_REVIEW_WAIT_MINUTES="${BOT_REVIEW_WAIT_MINUTES:-120}"
+# BOT_AGENT env var (if set) takes precedence over config
+_BOT_AGENT_ENV="${BOT_AGENT:-}"
+BOT_AGENT=$(bot_config '.bot.agent')
+if [ -n "$_BOT_AGENT_ENV" ]; then
+  BOT_AGENT="$_BOT_AGENT_ENV"
+fi
+unset _BOT_AGENT_ENV
+BOT_CLAUDE_MODEL=$(bot_config '.bot.claudeModel')
+BOT_CLAUDE_BIN=$(bot_config '.bot.claudeBin')
+BOT_CODEX_MODEL=$(bot_config '.bot.codexModel')
+BOT_CODEX_BIN=$(bot_config '.bot.codexBin')
+BOT_CURSOR_MODEL=$(bot_config '.bot.cursorModel')
+BOT_CURSOR_BIN=$(bot_config '.bot.cursorBin')
+
+# --allowedTools for an unattended agent session. Every caller uses this one
+# value: a job started with a shorter list than the crontab's fails somewhere
+# mid-session, on whichever tool the skill reaches for last.
+BOT_AGENT_TOOLS="Bash,Read,Glob,Grep,Write,Edit,Task,WebFetch"
+
+# Model for a /review-prs session, sweep or review request alike. The session
+# only runs scripts and launches subagents that pick their own model, so it
+# needs no Opus; on a large sweep its own context is re-read on every turn.
+BOT_REVIEW_MODEL="${BOT_REVIEW_MODEL:-sonnet}"
+
+# Agent for a scheduled /review-prs session or ping reply, independent of the one
+# ./run.sh drives (bot.agent). BOT_REVIEW_AGENT in the environment wins over
+# reviewer.agent, as BOT_AGENT does over bot.agent. See scripts/lib/review-agent.sh.
+_BOT_REVIEW_AGENT_ENV="${BOT_REVIEW_AGENT:-}"
+BOT_REVIEW_AGENT=$(bot_config '.reviewer.agent')
+if [ -n "$_BOT_REVIEW_AGENT_ENV" ]; then
+  BOT_REVIEW_AGENT="$_BOT_REVIEW_AGENT_ENV"
+fi
+unset _BOT_REVIEW_AGENT_ENV
+BOT_REVIEW_AGENT="${BOT_REVIEW_AGENT:-claude}"
+
+BOT_BP_DOCS_DIR=$(bot_config '.bestPractices.docsDir')
+
+# Absolute paths. Prefer these over the raw (base-ambiguous) config values.
+BOT_TARGET_REPO_DIR=$(resolve_target_repo "$BOT_TARGET_REPO_PATH")
+BOT_BP_DOCS_DIR_ABS=$(resolve_docs_dir "$BOT_BP_DOCS_DIR")
+
+# Validate required fields
+_missing=""
+[ -z "$BOT_PROJECT_NAME" ] && _missing="$_missing project.name"
+[ -z "$BOT_ORG" ] && _missing="$_missing project.org"
+[ -z "$BOT_PR_REPO" ] && _missing="$_missing project.prRepository"
+[ -z "$BOT_ISSUE_REPO" ] && _missing="$_missing project.issueRepository"
+[ -z "$BOT_USERNAME" ] && _missing="$_missing bot.username"
+if [ -n "$_missing" ]; then
+  echo "Error: Missing required config values in $BOT_CONFIG_FILE:$_missing" >&2
+  echo "  Run 'make setup' or edit config.json directly." >&2
+  return 1 2>/dev/null || exit 1
+fi
+
+# Fall back to 'opus' if claudeModel is not set
+if [ -z "$BOT_CLAUDE_MODEL" ]; then
+  BOT_CLAUDE_MODEL="opus[1m]"
+fi
+
+# Fall back to 'claude' if claudeBin is not set
+if [ -z "$BOT_CLAUDE_BIN" ]; then
+  BOT_CLAUDE_BIN="$(which claude 2>/dev/null || echo "claude")"
+fi
+
+# Fall back to 'codex' if codexBin is not set
+if [ -z "$BOT_CODEX_BIN" ]; then
+  BOT_CODEX_BIN="$(which codex 2>/dev/null || echo "codex")"
+fi
+
+# Fall back to 'cursor-agent' if cursorBin is not set
+if [ -z "$BOT_CURSOR_BIN" ]; then
+  BOT_CURSOR_BIN="$(which cursor-agent 2>/dev/null || echo "cursor-agent")"
+fi
+
+# bravebot's binary and model come from `./run.sh --agent-bin` / `--model` for one run,
+# from the environment, or from bot.bravebotBin / bot.bravebotModel (written by
+# `make setup`, because cron's PATH has no nvm directory for `which` to find it in).
+# Everything else is bravebot's own settings.
+if [ -z "${BOT_BRAVEBOT_BIN:-}" ]; then
+  BOT_BRAVEBOT_BIN=$(bot_config '.bot.bravebotBin')
+fi
+if [ -z "${BOT_BRAVEBOT_BIN:-}" ]; then
+  BOT_BRAVEBOT_BIN="$(which bravebot 2>/dev/null || echo "bravebot")"
+fi
+if [ -z "${BOT_BRAVEBOT_MODEL:-}" ]; then
+  BOT_BRAVEBOT_MODEL=$(bot_config '.bot.bravebotModel')
+fi
+BOT_BRAVEBOT_MODEL="${BOT_BRAVEBOT_MODEL:-}"
+
+# Default agent is 'claude' if not configured. BOT_AGENT env var overrides config.
+BOT_AGENT="${BOT_AGENT:-claude}"
+
+# The gh account defaults to the bot's GitHub username.
+if [ -z "$BOT_GH_ACCOUNT" ]; then
+  BOT_GH_ACCOUNT="$BOT_USERNAME"
+fi
+
+export BOT_DIR BOT_CONFIG_FILE
+export BOT_PROJECT_NAME BOT_ORG BOT_PR_REPO BOT_ISSUE_REPO BOT_DEFAULT_BRANCH BOT_TARGET_REPO_PATH BOT_TARGET_REPO_DIR BOT_PRD_MODE
+export BOT_PROFILE BOT_PROFILE_DIR BOT_PROFILE_WORKTREES BOT_MAX_CONCURRENT_RUNS BOT_CONCURRENT_JOBS
+export BOT_USERNAME BOT_EMAIL BOT_SSH_KEY_PATH BOT_SIGNING_KEY_PATH BOT_GH_ACCOUNT BOT_GH_CONFIG_DIR
+export BOT_REVIEWER_USERNAME BOT_REVIEWER_GH_CONFIG_DIR BOT_REVIEW_USERNAME
+export BOT_REVIEW_MAX_ROUNDS BOT_REVIEW_WAIT_MINUTES
+export BOT_AGENT BOT_CLAUDE_MODEL BOT_CLAUDE_BIN BOT_CODEX_MODEL BOT_CODEX_BIN BOT_CURSOR_MODEL BOT_CURSOR_BIN BOT_AGENT_TOOLS BOT_REVIEW_MODEL BOT_REVIEW_AGENT
+export BOT_BRAVEBOT_MODEL BOT_BRAVEBOT_BIN
+export BOT_BP_DOCS_DIR BOT_BP_DOCS_DIR_ABS
