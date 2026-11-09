@@ -34,9 +34,9 @@ SECURITY_ACTION_REF="${SECURITY_ACTION_REF:-main}"
 # leaving them out keeps this honest about what CI reports.
 ALL_RUNNERS="safesvg opengrep sveltegrep npm-audit pip-audit"
 
-CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/brave-dev-loop-reviewdog"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/reviewer-reviewdog"
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-BASE_REF="origin/master"
+BASE_REF="origin/main"
 MODE="diff"
 RAW=0
 RUNNERS=""
@@ -53,7 +53,7 @@ usage() {
 usage: check-reviewdog.sh [--full] [--base REF] [--runners LIST] [--raw]
 
   --full           Scan the whole tree instead of this branch's changes
-  --base REF       Compare against REF (default: origin/master)
+  --base REF       Compare against REF (default: origin/main)
   --runners LIST   Space or comma separated subset of:
                      safesvg opengrep sveltegrep npm-audit pip-audit
   --raw            Leave the <br> markup in, as the PR comments carry it
