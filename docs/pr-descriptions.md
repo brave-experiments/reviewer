@@ -1,0 +1,419 @@
+# PR descriptions
+
+The reviewer is a busy human who has not seen this code, did not read the
+issue, and is deciding in about thirty seconds whether to read the diff. The
+description exists to answer three questions in that time:
+
+1. **Can anybody using the product tell this landed?**
+2. **How do I see the problem myself?**
+3. **What exactly was wrong?**
+
+Everything else is optional. The diff is right there — the description is not
+the place to re-narrate it.
+
+`scripts/check-pr-body.py` enforces the mechanical half of this. Run it before
+`gh pr create`; see [Checking a body](#checking-a-body).
+
+## The shape
+
+```markdown
+Closes <owner>/<repo>#<issue>
+
+User impact: <what a person using the product can now see, or "none" and why not>
+
+## The problem
+<2-4 sentences. What goes wrong, who hits it, what they see.>
+
+## Reproduce
+<Numbered steps in the running product, then what you observed and what you
+expected. The test you added goes last, on one line.>
+
+## The fix
+<2-5 sentences in plain language. What changed and why that fixes it.>
+
+## Test plan
+- [x] <command> — passed
+- [ ] CI passes cleanly
+```
+
+Four required sections, in that order. `Closes` first, above everything, or the
+cross-repo issue does not close on merge. Anything else you want to say goes
+after the test plan or inside `<details>`.
+
+### When the PR fixes only part of the issue
+
+`Closes` is the default. Use `Part of` only when you can name what the issue
+still needs. Add a `Remaining:` line under `User impact:` when that work could
+not be done in this PR and no other open issue covers it; leave it out when the
+rest is already tracked elsewhere:
+
+```markdown
+Part of <owner>/<repo>#<issue>
+
+User impact: <as above>
+
+Remaining: <the piece of the issue this PR does not do, in one line>
+```
+
+`Part of` leaves the issue open, so on a PR that finishes the issue it strands a
+finished issue behind a merged fix. The checker enforces the other half of that:
+a `Remaining:` line that is empty or says `nothing` is an error, because a PR
+with nothing left closes its issue. The line itself is not required. When the
+PR does leave work no open issue covers, the same remaining work is posted as a
+comment on the issue once the PR exists, so whoever opens the issue sees what is
+left and which PR did the rest.
+
+## The user-impact line
+
+One line, not a section: above the problem and below `Closes`. It answers the
+question nobody should have to open the Files Changed tab to answer: can a
+person using the product tell that this landed?
+
+- **Good:** `User impact: a reply that takes 75 seconds now arrives instead of failing as a timeout.`
+- **Good:** `User impact: none -- a spec document, no code changes.`
+- **Bad:** `User impact: improves reliability.` Nobody can see reliability. Name
+  what is on the screen.
+- **Bad:** `User impact: none.` None because of what?
+
+**A change nobody can see is the case this line exists for.** A spec, a
+refactor, a doc, a CI fix and a test all read like a bug fix from the four
+sections, because the four sections are the same shape either way: a problem, a
+reproduction, a fix. A reviewer who cannot tell them apart spends the attention a
+behaviour change deserves on a document, or skims a document that was published
+to be argued with. One line at the top settles it, so say which — `none -- spec
+only`, `none -- a refactor, same output`, `none -- tests only`.
+
+The line is not a summary and not a second problem statement. If it runs past
+one line, the extra belongs in *The fix*.
+
+## The problem
+
+Write it for someone who has never opened this repository. Name the symptom
+before the mechanism: what a user, an operator, or a CI job actually observes.
+
+- **Good:** "A completion that takes more than 60 seconds to start answering
+  fails as a timeout and is retried, even though the configured limit is 600
+  seconds. Every retry dies at the same 60 seconds, so a slow model never
+  answers at all."
+- **Bad:** "`Timeout::preceeding` in ureq 3.4 `src/timings.rs` clamps a phase
+  deadline to the minimum of its own and its predecessors', so
+  `timeout_send_request` bounds TTFB."
+
+The second sentence is more precise and useless as an opener. It is the
+mechanism, and the mechanism belongs in *The fix* — after the reader knows why
+they should care. Four sentences is the budget. If the problem genuinely needs
+more, the extra goes in `<details>`.
+
+## Reproduce
+
+**This is the section reviewers want most, and the one that is usually
+missing.** Write it for a person who is going to follow it in the running
+product. If a user can see the bug, that is what the reproduction has to show:
+
+````markdown
+## Reproduce
+1. Configure a model that takes more than 60 seconds to produce its first
+   token, and leave the reply timeout at its 600 second default.
+2. Send it any prompt.
+3. Watch the request log.
+
+At 60 seconds the request fails with `timeout: send request` and is retried,
+and every retry dies at the same 60 seconds, so no answer ever arrives.
+Expected: the reply at 75 seconds, inside the 600 second limit.
+
+`make test TEST=SlowReply.FirstByteAfterSendBound` covers it — fails on the
+parent commit, passes here.
+````
+
+Rules:
+
+- **A user-visible bug gets user-visible steps.** Numbered, in the running
+  product, and specific enough to follow without guessing: the screen or URL,
+  the setting, the input. Not "enable the feature and use it".
+- **Name the front end the steps run in, and how the screen is reached inside
+  it.** Where a project ships more than one — a desktop application and a
+  terminal client, a command line and a web console — a step like "send a
+  message" does not say which of them to open, and the screen being fixed usually
+  exists in only one. Which front ends a project has is project-specific: see the
+  profile's `docs/testing.md`. Say it in the body as well when a file or setting
+  the steps touch is shared between them, so the shared thing is not read as
+  belonging to the front end you changed.
+  - **Bad:** "2. Send a message. 3. Open the settings screen."
+  - **Good:** "2. In the desktop application, type anything into the message box
+    and press Enter. 3. Click Settings in the sidebar, then the Automation tab."
+- **A step is something the person does, not something the program does.**
+  Where the product hands work to a model, a plugin or another service, the
+  calls it makes among themselves are not steps: nobody can type them. Write the
+  message the person sends, the button they press, the command they run, and
+  let the observed result say what the program did in response.
+  - **Bad:** "2. The assistant calls `search_items` with `{"query":"shot"}`, then
+    `open_item` with `{"id":"item:1"}`."
+  - **Good:** "2. Type `what does shot.png say?` and press Enter."
+- **Complete from a cold start.** A reviewer who has only this section and a
+  clean machine must be able to reach the result without reading the diff or the
+  test. That takes the command that launches the program and its configuration,
+  the state it needs (which files exist and where, which settings are on, what
+  an answered prompt looked like), the exact input, and what appears. Everything
+  a step depends on is either written in the steps or said not to matter.
+  A step that quietly relies on a detail of the test's fixture -- the only file
+  in the directory, a fixed name, a fresh profile -- names that detail.
+- **Say what stands in for a choice the person cannot make.** Some bugs need the
+  model, the server or the scheduler to do one particular thing, and no input
+  from the person makes it. Do not write the steps as if ordinary use gets
+  there. Say what is scripted (a stand-in model, a stub server, an injected
+  delay), give the command that starts it, show what it does in a fenced block,
+  and keep the person's steps separate from it. If nothing reachable by use or
+  by a stand-in gets there, that is `Not reproducible locally:`, not steps that
+  only work inside the test. How to start a stand-in is project-specific: see
+  the profile's `docs/testing.md`.
+- **State both sides.** What you observed, and what you should have observed. A
+  reproduction with no observed-vs-expected is a command, not evidence.
+- **Paste-able beats descriptive** wherever a command is part of it: the exact
+  command, with the directory it runs in if it is not the repo root. Not "run
+  the net tests".
+- **The test goes last, and it is not the reproduction.** Name the test you
+  added and say it fails on the parent commit — that is how a reviewer checks
+  both halves for themselves, and it belongs under the steps as supporting
+  evidence. Alone, it says a test the author also wrote now passes, which is
+  not the thing users complained about.
+- **A test-only change reproduces with the test.** A disable, a flaky-test fix,
+  a harness change — nothing a user could ever observe — and the test
+  invocation is the whole reproduction. Pass `--test-only-change` to the
+  checker so it stops asking for steps.
+
+If it genuinely cannot be reproduced on a laptop — a CI-only flake, a
+platform-specific build, a race that needs the fleet — say so on a line
+beginning `Not reproducible locally:` followed by the reason and a link to the
+evidence (the CI job, the crash report, the issue with the logs). The checker
+accepts that line in place of steps. It does not accept silence, and it does
+not accept using the line to avoid the work.
+
+## The fix
+
+Now the mechanism, in plain language, in a few sentences. Name a symbol only
+where naming it is the shortest true statement — "the retry loop", "the AWS
+credential chain" and "the session cache" beat their identifiers most of the
+time. No *source* paths, no line numbers, no upstream source citations: the
+reviewer has the Files Changed tab, and a path in prose goes stale the first
+time something moves. A path the product itself writes or reads is the opposite
+case — that one is the feature, and it belongs in the body.
+
+Do not enumerate the diff. "Added `foo()`, changed `bar()` to take a `&str`,
+updated the callers" tells a reviewer nothing they will not see in colour in
+ten seconds. Say what the code now does differently and why that is the fix.
+
+### Show it, do not describe it
+
+If the change alters anything a person could look at — a screen, a prompt, a
+file the product writes, a command's output, a new config key — paste the real
+thing in a fenced block. One block for the before, or one for the after, or
+both where the difference is the point. Copy it out of a real run; do not
+reconstruct it from the code, and do not paste more than the part that changed.
+
+Code blocks cost nothing against every length budget in this doc, so an example
+is free and a paragraph describing the example is not:
+
+- **Bad:** "An entry holds the line rather than anything a pattern could be read
+  out of: each step's name, the binary it resolved to, each argument, each
+  environment assignment and where each stream went, each its own field."
+- **Good:**
+  ````markdown
+  Pressing `r` appends one line to a new file, one per working directory:
+
+  ```
+  {"directory":"/Users/you/project","session":"a1b2c3","line":{"steps":
+  {"shape":"pipeline","steps":[{"program":"make","resolved":"/usr/bin/make",
+  "args":["check"],"environment":[],"routes":[]}]}}}
+  ```
+  ````
+
+The second one is shorter, is checkable against the diff, and answers questions
+the prose did not think to answer. The same applies to a new key on a prompt:
+show the row of keys as it now renders, not a sentence claiming a key was added.
+
+### Showing a terminal screen
+
+A full-screen program is the hard case, because its output is not its screen. It
+draws by moving the cursor and overwriting cells, so the bytes it wrote hold
+every value a cell ever had. Redirecting them to a file and stripping the escape
+sequences gives a wall of run-together words — `Filesherewillbereadastrusted` —
+which is worse than no screenshot, because it looks like evidence.
+
+Replay them instead. `scripts/terminal-screenshot.py` feeds a raw capture to a
+grid and prints the screen that grid ended up holding:
+
+```sh
+<whatever drives the interface> --raw /tmp/capture.txt   # the untouched bytes
+python3 scripts/terminal-screenshot.py /tmp/capture.txt --cols 100 --rows 30 --strict
+```
+
+`--cols` and `--rows` have to match the terminal the capture was taken at, since
+the program laid every frame out against that size; wrong ones give a screen
+that is wrong in a way that still looks plausible. `--strict` fails rather than
+print a screen holding a sequence the replay does not model. Use it: a screen
+nobody can trust costs a reviewer more than an honest paragraph. Whatever drives
+the interface is the project's own — the profile's `docs/testing.md` names it.
+
+Then paste the output in a fenced block above the test plan. No image: text goes
+in a body with no hosting, survives copy-and-paste, and can be searched, diffed
+and quoted, which is most of what a reviewer wants to do with it.
+
+**One screen per thing a person would have to be told.** A body showing the
+after and describing the before has described the half that matters. Where the
+change is a sequence — a prompt, the answer, what the answer led to — show each
+step; three fenced blocks cost nothing against any budget here and replace the
+paragraph that was going to try to narrate them. Trim each block to the rows
+that carry the difference.
+
+The checker decides this from the diff, not from the body: when a change touches
+a path the profile lists under `uiPaths`, a body with no screen above the test
+plan is an error, and nothing written in the body opts out of it. Pass
+`--diff-base <ref>` from the project worktree:
+
+```sh
+python3 scripts/check-pr-body.py --body-file /tmp/pr-body.md --diff-base upstream/main
+```
+
+### Never cite shorthand a reviewer cannot resolve
+
+`RUN-19`, `SEC-4`, `US-088`, `ADR-11` — a bare id names a document the reviewer
+does not have open, and it reads as though the body were written for the person
+who wrote it. Say the rule in English instead: "the answer may outlive the
+session" rather than "RUN-19 governs".
+
+Where the id genuinely has to appear — the PR builds that clause and a reviewer
+will want it — make it a link to the clause itself, and keep the English:
+
+```markdown
+The rule this builds, [RUN-19](https://github.com/owner/repo/blob/main/docs/specs/tools/run.md#RUN-19),
+says a prompt's answer may outlive the session and stops only the asking.
+```
+
+The checker rejects a bare id above the test plan, and warns about one inside
+`<details>`. Widely published identifiers — `UTF-8`, `CVE-2025-1234`,
+`RFC-7231` — are not shorthand and are left alone.
+
+## Test plan
+
+Checkboxes, one per command actually run, with the result. Real commands and
+real outcomes — a checkbox for something you did not run is a lie the reviewer
+will find in CI. Keep `- [ ] CI passes cleanly` last and unchecked.
+
+## What not to write
+
+These are what make a description read as machine-generated filler. The checker
+rejects the ones it can match:
+
+- **Preamble.** "This PR adds…", "In this change, we…". Start with the problem.
+- **Self-assessment.** `robust`, `comprehensive`, `seamless`, `elegant`,
+  `cleanly handles`, `significantly improves`, `properly handles`. Nobody
+  writes these about their own patch except to pad it.
+- **Emoji section headers**, ✅ checkmark decoration, bold on every other
+  phrase.
+- **A file-by-file changelog.** That is the diff.
+- **A bare clause, story or ticket id.** English, or a link. This is an error,
+  not a warning.
+- **Prose where an example would do.** If you find yourself describing a screen
+  or a file format in sentences, paste it instead.
+- **Restating the issue body** at length. Link it and summarise in two lines.
+- **Any AI attribution.** No "Generated with", no `Co-Authored-By: Claude`.
+
+Length of *prose* is the tell that outlasts all of them: if the visible body is
+paragraph after paragraph, a busy reviewer reads none of it. An example is not
+length in that sense, and no budget here counts it. Depth is not banned either
+— it is `<details>`' job:
+
+```markdown
+<details>
+<summary>Why the timeout knobs had to change together</summary>
+
+<the table, the upstream citation, the four cases>
+
+</details>
+```
+
+Collapsed, it costs a reviewer nothing and is there for the one who wants it.
+That is where a comparison table, a benchmark, a long root-cause chain, or a
+linked spec-clause reference belongs.
+
+## A rewrite
+
+Real body, shortened to its shape:
+
+> ## Summary
+> The effective bound on time-to-first-byte was 60s (`Timeouts::send`), not the
+> configured 600s (`Timeouts::reply`). A non-streaming completion POST whose
+> answer took 75s to produce its first byte failed with
+> `ureq::Error::Timeout(SendRequest)`, became a transient
+> `EgressError::Transport`, and was retried — each attempt cut at the same 60s.
+>
+> ## Fix
+> ureq gives a phase the earliest of its own deadline and those of the phases
+> before it (`Timeout::preceeding`, ureq 3.4 `src/timings.rs`), which its
+> configuration API does not document. `timeout_send_request`/
+> `timeout_send_body` therefore bounded the wait for the reply as well as the
+> send. <a four-row table follows>
+
+Accurate, and it opens with two type names and a field name. What a reviewer
+needs first:
+
+> User impact: a slow model answers at all now, instead of never.
+>
+> ## The problem
+> A model that takes more than 60 seconds to start answering never answers at
+> all. The request fails as a timeout, retries, and each retry dies at the same
+> 60 seconds — even though the configured limit for a reply is 600 seconds.
+> Slow models and long prompts are unusable.
+>
+> ## Reproduce
+> 1. Configure a model that takes more than 60 seconds to produce its first
+>    token, leaving the reply timeout at 600 seconds.
+> 2. Send any prompt and watch the request log.
+>
+> The request fails at 60 seconds with `timeout: send request` and is retried,
+> each retry dying at the same 60 seconds. Expected: the reply at 75 seconds.
+>
+> `make test TEST=SlowReply.FirstByteAfterSendBound` covers it — a loopback
+> server that waits 900ms against a 200ms send limit and a 10s reply limit.
+> Fails on the parent commit, passes here.
+>
+> ## The fix
+> Our timeout for sending a request was also being applied to waiting for the
+> reply, because ureq clamps each phase to the shortest deadline set on any
+> earlier phase — undocumented. Each value we hand ureq now accounts for every
+> phase it actually bounds, so the wait for a reply is bounded by the reply
+> limit alone.
+>
+> <details><summary>Which knob bounds which phase</summary>
+> <the table>
+> </details>
+
+Same facts, same precision. The reviewer gets the symptom, steps they can
+follow, and the cause before any identifier appears.
+
+## Checking a body
+
+```sh
+python3 scripts/check-pr-body.py --body-file /tmp/pr-body.md
+python3 scripts/check-pr-body.py --body-file /tmp/pr-body.md --test-only-change
+python3 scripts/check-pr-body.py --body-file /tmp/pr-body.md --diff-base upstream/main
+python3 scripts/check-pr-body.py --pr 214 --repo <owner>/<repo>   # after the fact
+```
+
+`--test-only-change` is for a diff that touches only tests: it drops the
+warning about reproducing by test invocation alone. Passing it for a change a
+user can see defeats the point of the section.
+
+`--diff-base` runs in the project worktree and reads the changed paths itself,
+which is how the screen rule is decided — see [Showing a terminal
+screen](#showing-a-terminal-screen). Pass it on every run: without it the
+checker cannot see the diff, and a body that shows nothing passes.
+
+Errors exit non-zero and must be fixed before the PR is created. Warnings are
+printed and do not fail — read them, they are the slop and reproduction
+heuristics, and they are right more often than not. `--strict` makes warnings
+fail too.
+
+The checker matches structure and phrasing. It cannot tell whether the
+reproduction actually reproduces, or whether the problem statement is true.
+Those are still yours.
