@@ -1,4 +1,4 @@
-# Lint and the test suite, on every pull request and every push to master.
+# Lint and the test suite, on every pull request and every push to main.
 #
 # `make check` is lint, the tests, and the security scan. The scan already runs
 # on a pull request here as an organization-level workflow calling
@@ -21,7 +21,7 @@ name: lint and test
 on:
   pull_request:
   push:
-    branches: [master]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -59,7 +59,7 @@ jobs:
 
       # Unpinned, as scripts/install-dev-deps.sh installs them locally, so this
       # runs what a contributor's machine runs. The cost is that a ruff release
-      # which reformats something turns master red with no change to the code;
+      # which reformats something turns main red with no change to the code;
       # `make format` is the fix.
       - name: Install pytest and ruff
         run: python -m pip install --disable-pip-version-check pytest ruff
