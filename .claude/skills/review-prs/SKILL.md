@@ -62,7 +62,7 @@ Read the manifest with the Read tool, not a shell command. A denied tool call is
 Run the prepare script with all arguments (`auto` → `--auto`, `reviewer-priority` → `--reviewer-priority`, `full` → `--full`):
 
 ```bash
-BOT_DIR="<absolute path to brave-dev-loop directory>"
+BOT_DIR="<absolute path to the reviewer directory>"
 python3 $BOT_DIR/.claude/skills/review-prs/prepare-review.py [days|page<N>|#<PR>] [open|closed|all] [--auto] [--reviewer-priority] [--full]
 ```
 

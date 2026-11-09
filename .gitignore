@@ -1,0 +1,44 @@
+# Ignore directory - for local files that should not be tracked
+.ignore/
+
+# Project config - user-specific (template: config.example.json)
+config.json
+
+# Trusted reviewers allowlist - user-specific
+scripts/trusted-reviewers.txt
+
+# Claude settings - user-specific (but track project skills)
+.claude/settings.local.json
+
+# Virtualenv made by `make setup`
+.venv/
+
+# Backup files
+*.backup
+*.bak
+
+# Log files
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# direnv
+.envrc
+
+__pycache__
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
