@@ -1,4 +1,4 @@
-"""Shared config helper for brave-dev-loop Python scripts.
+"""Shared config helper for reviewer Python scripts.
 
 Usage:
     from lib.load_config import load_config, get_config, require_config
@@ -146,10 +146,9 @@ def best_practices_index(config, base_dir=None):
     return os.path.join(docs, index)
 
 
-# Absent project.profile means a deployment that predates profiles. Those are
-# all brave-core, so default there rather than to the generic profile -- an
-# unattended bot must not change behaviour just because a key is missing.
-DEFAULT_PROFILE = "brave-core"
+# Absent project.profile means the generic profile: no project's review rules
+# are assumed.
+DEFAULT_PROFILE = "default"
 
 
 def profile_dir(config, base_dir=None):
