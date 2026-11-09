@@ -1,0 +1,113 @@
+# Bot identity
+
+How the bot commits, signs and pushes as its own GitHub account without touching the machine owner's global git or `gh` setup.
+
+The bot commits and pushes as a different GitHub account than the person who owns the machine. Left alone, git and `gh` both default to the machine owner: pushes to the bot's fork get rejected, and any that succeed are attributed to the wrong person.
+
+Setup pins the bot's identity without touching anything global. Nothing here modifies `~/.gitconfig`, `~/.ssh/config`, or `gh`'s active account, so other repos and other terminals behave exactly as before.
+
+| What | Where it is set | Scope |
+| --- | --- | --- |
+| `user.name`, `user.email` | `<target-repo>/.git/config` | That repo only |
+| `core.sshCommand` | `<target-repo>/.git/config` | That repo only |
+| `GIT_SSH_COMMAND` | exported by `run.sh` | The bot process and its children |
+| `GH_TOKEN` | exported by `run.sh` | The bot process and its children |
+
+The ssh command is `ssh -o IdentitiesOnly=yes -i <key>`. `IdentitiesOnly=yes` is required, not decoration: without it ssh-agent offers whatever keys it holds and GitHub authenticates as the owner of the first one accepted, ignoring `-i` entirely.
+
+Setup verifies the chosen key with `ssh -T git@github.com` and warns if it authenticates as someone other than `bot.username`.
+
+**Choosing a key.** Setup lists one entry per key, not one per file. Where a private key sits beside its `<key>.pub`, the `.pub` is offered: ssh matches it against ssh-agent and falls back to the private file beside it, so it works either way. Where the two halves are named differently (`botkey.ppk` + `botkey.pub`), the private file is offered instead — `-i` on that `.pub` has no `botkey` beside it to fall back to, so it only works while the agent holds the key. A pair setup cannot match by fingerprint, such as an encrypted PEM key, is listed under both names; there, prefer the `.pub`, since `-i` on the private file cannot reach the agent copy.
+
+**Scheduled runs.** A passphrase-protected key only works while ssh-agent holds it. Runs started by `make schedules` have no agent, so use a dedicated passphrase-less key for the bot if you schedule it. Setup flags keys with `[needs ssh-agent]`.
+
+**`gh` is separate.** The SSH key covers git transport only; `gh` carries its own stored token. `run.sh` reads the bot's token with `gh auth token --user <account>` and exports it as `GH_TOKEN` for that process. This reads the token without switching accounts — `gh auth switch` would change global state. To add the bot account:
+
+```bash
+gh auth login --hostname github.com   # makes the new account active
+gh auth switch --user <your-own-login>  # switch back; both tokens stay stored
+```
+
+**Checking a signature locally.** Signing a commit and being able to read that signature back are separate settings, and without the second git prints an error and `No signature` for a good one — the same words it uses for a commit that was never signed. So setup writes `<target-repo>/.git/allowed_signers`, naming the bot's address and signing key, and points `gpg.ssh.allowedSignersFile` at it. `git log --show-signature` then reports the bot's commits as good, and a commit by anybody else as having no matching principal, which is a different sentence from having no signature. GitHub is not the place to find this out: it shows a signature it cannot attribute as Unverified, on a page nobody opens until a reviewer does.
+
+## Reviewer account
+
+The bot opens PRs, and GitHub does not let an account approve its own. So scheduled reviews can run as a second account, the reviewer. `make setup` asks for its username (blank keeps reviewing as the bot), saves it as `reviewer.username` in `config.json`, and then walks you through the login:
+
+```bash
+GH_CONFIG_DIR=~/.config/gh-<reviewer> gh auth login --hostname github.com --web --skip-ssh-key
+```
+
+Setup offers to run that for you. Sign in to github.com as the reviewer first (a private window if you are signed in as someone else); gh prints a one-time code to enter at github.com/login/device. Setup then checks the login resolves to the reviewer, and reports the reviewer's access to the PR repository: approvals only count toward required reviews from an account with write access.
+
+The login lives in its own gh config directory, `~/.config/gh-<reviewer>` by default (`reviewer.ghConfigDir` overrides it), so it never enters your gh config or the bot's. Nothing global changes.
+
+| Runs as | Jobs |
+| --- | --- |
+| Reviewer | the `/review-prs` sweeps and the review-request poll (`check-review-requests.sh`, `review-requested.sh`), including the replies to pings it makes (`reply-to-pings.sh`) |
+| Bot | `run.sh`, the PRD sync, maintenance jobs, and the git fetches that precede a review |
+
+The cron lines for the first row go through `scripts/as-reviewer.sh`, which reads `config.json` when the job fires. Once the jobs have been installed with the wrapper (`make schedules-review`), adding, changing or removing the reviewer needs no further re-sync. The wrapper sets `GH_TOKEN` to the reviewer's token as well as `GH_CONFIG_DIR`, because `.envrc` exports the bot's `GH_TOKEN` into every cron job and a token outranks a config directory.
+
+It does not fall back. With a reviewer configured, a missing login, or a directory logged in as a different account, stops the job with an error in its log; quietly reviewing as the bot would defeat the account's purpose. Clear `reviewer.username` to go back to the bot.
+
+`prepare-review.py` and `collect-results.py` re-run themselves through the wrapper when the gh login in force is not the reviewer, so a `/review-prs` typed into a session reviews as the reviewer too. Run as the bot, a review of a PR the bot opened can only comment, and it caches the commit as reviewed, so no later run approves it.
+
+Approving needs only triage, but resolving a review thread needs write access (or authorship of the PR), so without it every re-review ends in "request changes" over threads the code already answers. A reviewer with write access could also push and merge, which is why the scheduled sessions never hold its token: `scripts/review-session.sh` runs the two scripts that talk to GitHub itself and starts the session that reads the PR without one (see [skills.md](skills.md)).
+
+`run.sh` itself runs as the bot, but with a reviewer configured it waits for the reviewer's verdict on every pull request it pushes to, and answers a request for changes before moving on: see [Review gate](review-gate.md).
+
+Review requests are polled for the reviewer, not the bot: a human asks for a review from the account that will answer it. To run any command by hand as the reviewer, `./scripts/as-reviewer.sh -- <command>`.
+
+The bot asks the reviewer for a fresh review after each follow-up push to an open PR (`scripts/request-review.sh <pr>`, run as the bot, the PR's author), because GitHub removes a reviewer from the request list once they have reviewed. With no reviewer configured it does nothing.
+
+## Hooks
+
+Three hooks are installed by `make setup` — into the target repo, and `pre-commit` into this repo as well — and every run reinstalls the target-repo ones whose installed copy differs from this checkout's. `make setup` runs once per machine, so without that a hook added here afterwards reaches a repo configured before it existed only if somebody remembers to run setup again, and until they do nothing reports the gap: the repo pushes exactly as it always did, with one fewer check than this checkout believes it has. The signature refusal below landed that way and sat uninstalled for a week in the repository it was written for.
+
+**pre-commit** (`hooks/pre-commit`), installed into the target repo and into this one:
+Blocks the configured bot account from modifying dependency files (package.json, DEPS, Cargo.toml, go.mod, etc.), so no bot introduces an external dependency without review. It also refuses any user's commit of this loop's runtime state — `data/prd.json`, `data/progress.txt`, `data/run-state.json`, `data/claims.json` — which `.gitignore` keeps out of an ordinary `git add` and not out of `git add -f`.
+
+Both guards are in one file because one repository can need both. Where the target repo is this repo — a deployment developing the loop itself — they wanted the same `hooks/pre-commit` path from two installers, and whichever wrote second silently replaced the other's guard.
+
+**Target repo pre-push** (`hooks/pre-push`):
+Refuses a push whose new commits are authored or committed by anybody other than the `user.name` and `user.email` set above. Commits already on a remote-tracking ref are not its subject, so a branch rebased onto upstream work is not blamed for who wrote that work.
+
+It refuses an unsigned commit on the same terms, where `commit.gpgsign` is true — the state setup leaves the repo in. Signing fails at commit time rather than at setup, because a key the agent has to hold is one a given shell may not reach, and the way past that failure is `--no-gpg-sign` on one commit at a time. Nothing downstream reports the result: GitHub marks the commit Unverified on a page nobody opens, and no check fails, so a branch has gone out and been approved that way. The refusal names the base to re-sign onto, which is the parent of the oldest commit the push would create rather than of `HEAD`:
+
+```bash
+git rebase -f --gpg-sign <base>
+```
+
+That rewrites no file and no message. A repo where `commit.gpgsign` is unset has no signature to be missing and is not held to one.
+
+It also checks which account would open the pull request, because `gh pr create` reads no git config at all: a branch every commit of which is correctly authored and signed can still be followed by a pull request opened by the machine owner, and a pull request's author cannot be reassigned afterwards, only closed and opened again. Where `GH_TOKEN` is already exported, as `run.sh` does, the hook trusts it and says nothing. Otherwise, if `gh`'s active account is not the bot and a stored token for the bot exists, it refuses the push and names the one-line fix:
+
+```bash
+export GH_TOKEN=$(gh auth token --user <bot-account>)
+```
+
+That pins `gh` for one shell, leaving its active account and every other terminal alone.
+
+**Target repo post-checkout** (`hooks/post-checkout`):
+Copies the main checkout's `.envrc` and `.env` into a newly added worktree and runs `direnv allow` there. `git worktree add` copies only what git tracks, so without this a story's worktree builds against defaults instead of the configuration the main checkout has, and the difference surfaces as a test that fails only in the worktree.
+
+It copies the hooks themselves too, where `core.hooksPath` is *relative*. Git resolves such a path against each working tree's own top level, and every hook installed here is untracked by design — so a new worktree looked for hooks in its own copy of that directory, found only what the repo committed, and pushed with none of ours. `pre-push` was the one that mattered: a pull request went out unsigned from a worktree while the identical push from the main checkout would have been refused. This hook hid the gap rather than causing it, because git resolves *it* from the tree being left and runs it with the new worktree as its cwd — so it fires on `git worktree add` and looks like proof the hooks are in force there. A hook the repo tracks is left exactly as its author committed it.
+
+It is a hook rather than a step in the agent's instructions because a hook costs no tokens: it runs on the `git worktree add` itself and adds nothing to any prompt. Nothing else in a checkout triggers it — git reports the null sha as the previous HEAD only when there was none, and the main checkout and a fresh clone are told apart from a linked worktree by whether their git dir is the shared one.
+
+Each hook is inert in a checkout whose `user.name` is not the bot — it exits at its first check having done nothing, so a person's clone of the same repository behaves as if none were there. The runtime-state half of `pre-commit` is the exception, and deliberately: those files are nobody's to commit.
+
+**Where a target repo's hook lands.** Not `<repo>/.git/hooks` unconditionally. `core.hooksPath` *replaces* that directory rather than adding to it, so in a target repo that sets it — as one with its own checked-in hooks does — a hook written to `.git/hooks` never runs and never says so. Setup resolves the configured path and installs into that.
+
+Two things follow from the resolved directory usually being inside the working tree. Setup adds an entry to the target repo's `.git/info/exclude`, which is local to the clone, so the installed file does not show up as untracked and no tracked `.gitignore` is touched. And where the target repo already tracks a hook of that name, nothing is installed over it, rather than overwriting a file somebody committed. Setup names it, so whoever is setting the machine up knows the check that hook would have carried is not in force; a run passes over it silently, since a line printed at every start is one nobody reads.
+
+A third follows for worktrees, and it is why installing into the main checkout is not the whole job. Where the path is relative, each worktree has a directory of its own, so each needs its own copy. `post-checkout` covers one being created; it fires on that checkout and never again, so a worktree that already existed — which is every story's, once the run that made it has ended — keeps pushing without whatever it is missing. So a run installs into every worktree at start, on the same terms: nothing over a hook the repo tracks, and nothing said about one already current.
+
+## Commit Format
+
+```
+feat: [Story ID] - [Story Title]
+```
+
+Commits must NOT include `Co-Authored-By` lines.
