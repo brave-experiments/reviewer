@@ -1,0 +1,25 @@
+# === reviewer (brave-core:review) scheduled jobs ===
+# Managed by sync-schedules.sh - do not edit manually
+# Jobs: projects/brave-core/schedules.sh
+SHELL=/bin/bash
+PATH=/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+
+# Review PRs — skip if no recent open PRs
+# Gate check runs before git sync to avoid wasted fetches
+# Three slots, the same count the review-request poll below asks for: a
+# sweep asking for one would take slot 1 only, and exit doing nothing
+# every time a poll happened to be holding it.
+# Weekdays: 2x/day
+0 13,20 * * 1-5 cd {BOT} && source .envrc && ./scripts/check-new-prs.sh 2>> {BOT}/logs/review-prs-cron.log && { git fetch origin && git checkout main && git reset --hard origin/main && ./scripts/sync-target-repo.sh && ./scripts/as-reviewer.sh -- ./scripts/with-lock.sh review-prs --slots 3 -- ./scripts/review-session.sh --model sonnet -- 1d open --auto --reviewer-priority ; } >> {BOT}/logs/review-prs-cron.log 2>&1
+# Weekends: once/day at noon
+0 12 * * 0,6 cd {BOT} && source .envrc && ./scripts/check-new-prs.sh 2>> {BOT}/logs/review-prs-cron.log && { git fetch origin && git checkout main && git reset --hard origin/main && ./scripts/sync-target-repo.sh && ./scripts/as-reviewer.sh -- ./scripts/with-lock.sh review-prs --slots 3 -- ./scripts/review-session.sh --model sonnet -- 1d open --auto --reviewer-priority ; } >> {BOT}/logs/review-prs-cron.log 2>&1
+
+# Review requested from the bot, or an org member pinging it — skip unless someone asked
+# Gate check runs before git sync to avoid wasted fetches (288 runs/day, most exit early)
+# Every 5 min, on minutes no other job here uses. A review runs for far
+# longer than the gap between polls, so runs overlap rather than waiting:
+# three review-prs slots, shared with the sweep above, and a lock per PR
+# inside the job so two runs never review the same one.
+4,9,14,19,24,29,34,39,44,49,54,59 * * * * cd {BOT} && source .envrc && ./scripts/check-review-requests.sh 2>> {BOT}/logs/review-requested-cron.log && { git fetch origin && git checkout main && git reset --hard origin/main && ./scripts/sync-target-repo.sh && ./scripts/as-reviewer.sh -- ./scripts/with-lock.sh review-prs --slots 3 --timeout 14400 -- ./scripts/review-requested.sh ; } >> {BOT}/logs/review-requested-cron.log 2>&1
+
+# === end reviewer (brave-core:review) ===
