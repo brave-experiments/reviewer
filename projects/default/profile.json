@@ -1,0 +1,7 @@
+{
+  "description": "Generic project: no build system or test runner assumed.",
+  "labels": {
+    "pr": [],
+    "disabledTest": ""
+  }
+}

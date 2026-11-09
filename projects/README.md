@@ -1,0 +1,120 @@
+# Project profiles
+
+Everything in this repo outside `projects/` is project-neutral. Anything that
+only makes sense for one codebase — build commands, test targets, how upstream
+tests are detected, which validation steps a story must pass — lives in a
+profile here and is selected by `project.profile` in `config.json`.
+
+```
+projects/<name>/
+  profile.json   # validations, test steps, test targets
+  schedules.sh   # this project's cron jobs
+  docs/          # prose the workflow docs point at
+```
+
+**`profile.json`**
+
+| Key | Purpose |
+| --- | --- |
+| `research` | Reading steps every story starts with. `{bestPractices}` becomes the absolute path of `bestPractices.docsDir` + `indexFile`, `{targetRepo}` the absolute target repo path; an entry naming a substitution that does not resolve is dropped rather than pointing an agent at a path the project does not have. |
+| `validations` | Ordered acceptance-criteria steps every story ends with. `{testStep}` is replaced per story kind, and dropped when the profile defines no test step for that kind. |
+| `testSteps` | Templates for `testFix`, `disabledTest`, and `generic` stories. `{testBinary}` and `{testFilter}` are substituted. |
+| `labels` | Project labels: `pr` (applied to bot PRs), `disabledTest` (marks an issue as a disabled test), `inProgress` (marks an issue as being worked, so deployments on other machines skip it — see [Concurrent runs](../docs/concurrent-runs.md)), and `axes` (the label prefix that spells each triage axis, so the backlog can be ordered by them — see [Backlog order](../docs/workflow-state-machine.md#backlog-order-the-three-triage-axes)). `labels.disabledTestLabel` and `labels.inProgressLabel` in `config.json` are honoured as fallbacks. |
+| `prDraft` | Whether the bot opens this project's pull requests as drafts (`true`) or ready for review (`false`). Absent means `true`. A draft requests no reviewers, so a project whose PRs are reviewed straight away sets `false`; brave-core is `true`, bravebot `false`. `scripts/lib/load_config.py:pr_draft()` reads it. |
+| `testTargets` | Maps a suite (`unit`, `browser`) and a location to a test binary. `local` is a test defined in the target repo, `upstream` one inherited from the surrounding checkout. |
+| `uiPaths` | Repo-relative paths whose changes a person can look at. A change under one of them has to show the screen it produces, and `check-pr-body.py --diff-base` errors when the body shows none — see [Showing a terminal screen](../docs/pr-descriptions.md#showing-a-terminal-screen). A path with no `*`, `?` or `[` matches everything beneath it. Omit the key for a project with no interface, and no screen is asked for. |
+| `localization` | Where this project keeps the words a person reads, so `check-untranslated.py --diff-base` can name the sentences a branch wrote into the source instead. `paths` and `exempt` read like `uiPaths`; `catalog` is the reference catalog and `how` the instruction quoted back to the author. The rest is the language's own spelling, and there are no built-in defaults worth relying on: `quotes` (default `"`), `comments` (default `//`), `developer` — calls whose strings are for whoever is debugging, where a trailing `*` is a prefix and a trailing `!` or `(` is matched as written — and `testsBegin`, a regex for the line below which a file is test code. Omit the key and nothing is checked; the check says so rather than passing quietly. |
+| `review` | How `/review-prs` reviews this project's pull requests, beyond the best-practices rules. `guidance` is a string or a list of strings of review text; when present, one extra detect subagent applies it to each PR, reading the files it names from the PR's source tree, and the validator judges its findings against it. Its findings are severity `high` with no rule link, so a PR that trips one is not approved. `requestChanges: true` submits a review that has a finding above nit severity, or an earlier comment still open, as GitHub's `REQUEST_CHANGES` (a `COMMENT` review on a PR the bot opened itself), and approves a clean one, with none of what `verdict` adds: the review is the inline comments and the event, with no recommendation header, summary or description check. `verdict: true` makes a posted review open with its recommendation, "Recommendation: approve" on the approval and "Recommendation: request changes" on a review with a high or medium finding or an earlier comment still open, and "Recommendation: comments only" on one with only nits. The first is submitted as GitHub's `REQUEST_CHANGES` (a `COMMENT` review on a PR the bot opened itself), the others as `COMMENT`. Under the recommendation the review says what the pull request does, gives numbered steps for trying it by hand when its description has none, and lists the parts of the description shape in [docs/pr-descriptions.md](../docs/pr-descriptions.md) it lacks (the `User impact:` line, the problem, reproduction, fix and test plan sections). Below those it carries a collapsed "How this review reached its recommendation" section that says, in plain sentences, how many files and rules were read, which passes ran, and how many flagged problems the second reader kept. `checks` is a list of plain-language sentences, one per thing `guidance` looks for, that the section prints under "This project's own criteria"; without it the section names that pass but lists nothing. `linkRules: true` has the validator name the rule a finding from the bug or project-guidance pass breaks, as a link appended to the comment (the link is checked against the docs, and it does not change how findings are deduplicated). `proposeBestPractices: true` lets the validator describe one rule the project lacks, which an automatic run files as an issue titled `Best practice: ...` in the issue repository (one per PR, three per run, skipped when a rule or an earlier issue already says it); it never edits the docs. `labelPrs` labels each pull request once, the first time a review reads it, with the review it needs: `rules` are labels the changed paths decide (`any` or `only` a list of globs, and `exclude`), `judged` maps a label a path cannot decide to the definition one subagent applies; nothing is applied until every label named exists in the PR repository. See [pr-labels.md](../docs/pr-labels.md). Omit the key and the review runs the rules and the bug pass only, with an empty review body. |
+
+**`schedules.sh`** holds this project's cron jobs — see [Schedules](#schedules).
+
+**`docs/`** holds the prose. The shared workflow docs keep a one-line pointer
+wherever a step is project-specific; `run.sh` passes the resolved profile docs
+path in the agent prompt.
+
+**Defaulting.** A config with no `project.profile` resolves to `brave-core`,
+because every deployment predating profiles is a brave-core one and an
+unattended bot must not change behaviour just because a key is missing. New
+setups get the profile named after the project when a directory of that name
+exists here, and `default` otherwise.
+
+**A profile named after the project is that project's profile**, so a config
+that still says `default` (or nothing) while `projects/<project.name>/` exists
+is one where nobody chose. `run.sh` refuses to start on that rather than
+running the story under generic validations, and `add-backlog-to-prd.py` and
+`sync-bot-prs-to-prd.py` refuse to write stories from it — wrong acceptance
+criteria outlive the config that produced them. `./run.sh --status` says the
+same thing without stopping anything. Deliberately pairing a project with a
+differently named profile is fine: name it in `project.profile` and nothing
+complains.
+
+**Adding a project.** Copy `projects/default/`, fill in `profile.json`, and add
+only the docs your workflows actually need — an absent doc just means the
+pointer has nothing to add.
+
+## Schedules
+
+`make schedules` installs the crontab blocks for one project, and the jobs in
+them come from `projects/<profile>/schedules.sh`. A profile with no such file gets
+`projects/default/schedules.sh`, so a new project is still just a profile
+directory.
+
+Each file defines up to three functions, one per group of jobs, and each prints
+crontab lines built with the helpers in `scripts/lib/cron-jobs.sh`:
+
+| Function | Holds |
+| --- | --- |
+| `schedule_run` | the `run.sh` jobs and the PRD sync that feeds them |
+| `schedule_review` | the `review-prs` sweeps and the poll for requested reviews |
+| `schedule_maintenance` | everything else: pattern search, the repo sync |
+
+A group a project has no jobs in is simply not defined. For example:
+
+```sh
+schedule_run() {
+  bot_cron_job "0 1 * * *" "./scripts/check-has-work.sh" \
+    "./scripts/sync-target-repo.sh && ./run.sh 20" "run-cron.log"
+}
+```
+
+`bot_cron_job` gives every job the same prologue — the bot directory, the bot
+identity from `.envrc`, its gate, and a hard reset of the bot repo — so a job
+line says only what is particular to it. The gate runs before the git sync: a
+job with nothing to do costs no fetches. `bot_cron_agent <lock> '<prompt>'
+[slots] [model]` builds the command for a job that starts an agent session,
+held under a named lock; a `/review-prs` job passes `"$BOT_REVIEW_MODEL"` as
+its model. A job that reviews (a sweep, or the review-request poll) wraps its
+command in `bot_cron_as_reviewer '<command>'`, so it acts as the reviewer account
+when the deployment has one and as the bot when it does not — see
+[Reviewer account](../docs/bot-identity.md#reviewer-account).
+
+Cron reads the machine's local clock, so an hour in a schedule is an hour in the
+machine's time zone.
+
+Each group is a crontab block of its own, marked with the `project.name` and the
+group (`brave-dev-loop (bravebot:review)`), so one group installs without the
+others:
+
+```sh
+make schedules           # every group
+make schedules-run       # only the run.sh jobs
+make schedules-review    # only the review jobs
+```
+
+The same `--group` (`run`, `review` or `maintenance`) works on
+`scripts/sync-schedules.sh` directly. One machine can run several deployments:
+installing a project's schedules replaces that project's blocks and leaves every
+other block — another project's, or anything you wrote yourself — where it is.
+
+`make remove-schedules` is the inverse: it strips every one of this project's
+blocks and leaves every other line in the crontab alone. `make
+remove-schedules-run` and `make remove-schedules-review` strip one group.
+`make schedules` puts everything back.
+
+A crontab installed before jobs were grouped holds one block for the whole
+project. `make schedules` and `make remove-schedules` replace or remove it;
+installing or removing a single group refuses while it is there, because the
+group cannot be cut out of it.
+
+`make view-schedules` renders the block this deployment would install and says
+which file produced it.

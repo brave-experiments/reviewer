@@ -117,17 +117,10 @@ while IFS= read -r line; do
 
   # Extract the task name from the command
   task_name=""
-  if [[ "$command" == *"./run.sh"* ]]; then
-    # Extract iteration count: look for number after run.sh
-    if [[ "$command" =~ run\.sh[[:space:]]+([0-9]+) ]]; then
-      task_name="run.sh (${BASH_REMATCH[1]} iterations)"
-    else
-      task_name="run.sh"
-    fi
-  elif [[ "$command" =~ -p\ \'(/[a-z-]+) ]]; then
-    task_name="${BASH_REMATCH[1]}"
-  elif [[ "$command" == *"git push origin"* ]]; then
-    task_name="sync repo upstream→origin"
+  if [[ "$command" == *"review-requested.sh"* ]]; then
+    task_name="review requests"
+  elif [[ "$command" == *"review-session.sh"* ]]; then
+    task_name="review-prs"
   else
     task_name="(unknown)"
   fi
@@ -153,10 +146,7 @@ while IFS= read -r line; do
 done <<< "$BLOCK"
 
 # Show currently running jobs
-# Detect via two methods:
-# 1. Lock files (with-lock.sh jobs) — try flock; if we can't acquire, it's held
-# 2. Process scan (run.sh) — run.sh releases its lock before children finish,
-#    so we look for timeout-tree.sh processes spawned from the bot directory
+# Lock files (with-lock.sh jobs) — try flock; if we can't acquire, it's held
 BOT_DIR_ABS="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOCK_DIR="$BOT_DIR_ABS/.ignore"
 # The locks this project's jobs actually take, read off the block itself — a
@@ -164,21 +154,6 @@ LOCK_DIR="$BOT_DIR_ABS/.ignore"
 mapfile -t LOCK_NAMES < <(grep -o 'with-lock\.sh [a-z-]*' <<< "$BLOCK" | awk '{print $2}' | sort -u)
 
 has_running=false
-
-# Check run.sh — look for timeout-tree.sh processes from this bot directory
-run_pid=$(ps -eo pid,args | grep "[t]imeout-tree.sh.*claude.*workflow" | head -1 | awk '{print $1}')
-if [ -n "$run_pid" ]; then
-  has_running=true
-  echo -e "${BOLD}Running Jobs${RESET}"
-  elapsed=$(ps -o etime= -p "$run_pid" 2>/dev/null | tr -d ' ')
-  # Extract story ID from the command args
-  story=""
-  args=$(ps -o args= -p "$run_pid" 2>/dev/null)
-  if [[ "$args" =~ story\ (US-[0-9]+) ]]; then
-    story=" (${BASH_REMATCH[1]})"
-  fi
-  echo -e "  ${GREEN}run.sh${story}${RESET}  running for ${CYAN}${elapsed}${RESET}  (pid $run_pid)"
-fi
 
 # Check with-lock.sh jobs via lock files
 for name in "${LOCK_NAMES[@]}"; do

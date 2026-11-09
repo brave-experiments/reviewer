@@ -1,0 +1,11 @@
+{
+  "description": "brave-dev-loop developing itself: stdlib Python and bash behind make, checked by lint-and-test.yml plus the organization-level brave/security-action scan. The target repo is the loop's own checkout.",
+  "uiPaths": [
+    "scripts/run-status.sh",
+    "scripts/view-schedules.sh"
+  ],
+  "labels": {
+    "pr": [],
+    "disabledTest": ""
+  }
+}
