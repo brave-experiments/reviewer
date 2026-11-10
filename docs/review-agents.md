@@ -63,7 +63,8 @@ What replaces the allowlist:
 3. **Write confinement is deny-list based.** Paths nobody listed (for example the system
    temporary directory) stay writable by the file tools. Programs are held by the sandbox.
 4. **`--trust-workspace`** trusts the whole bot directory so the `/review-prs` skill under
-   `.claude/skills` loads. It trusts the PR checkout nothing, but it does vouch for the
+   `.claude/skills` loads (a symlink into the checked-in `agents/skills`, made by
+   `make setup`). It trusts the PR checkout nothing, but it does vouch for the
    bot directory's own files.
 5. **Programs `run` starts can reach the network.** The session holds no GitHub token,
    and credential paths are denied to programs, but a program it runs can send out

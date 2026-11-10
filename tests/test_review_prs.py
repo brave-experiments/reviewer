@@ -2235,7 +2235,7 @@ class TestBugPassReadsTheSource:
         assert "when in doubt, leave it out" not in prompt.lower()
 
     def test_the_detect_agent_can_search_the_tree(self):
-        agent = os.path.join(ROOT_DIR, ".claude", "agents", "review-prs-detect.md")
+        agent = os.path.join(ROOT_DIR, "agents", "agents", "review-prs-detect.md")
         with open(agent) as f:
             head = f.read().split("---")[1]
         tools = [t for t in head.split("tools:")[1].split("\n")[0].split(",")]

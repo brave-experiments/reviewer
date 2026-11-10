@@ -1,4 +1,4 @@
-.PHONY: test lint format check check-reviewdog check-reviewdog-full setup schedules schedules-review remove-schedules remove-schedules-review view-schedules clean
+.PHONY: test lint format check check-reviewdog check-reviewdog-full setup link-agents schedules schedules-review remove-schedules remove-schedules-review view-schedules clean
 
 # Prefer .venv when it exists so no target needs an activated shell. PEP 668
 # interpreters (Homebrew, recent Debian) refuse a system-wide pytest install, so
@@ -44,6 +44,12 @@ setup:
 	@./scripts/install-dev-deps.sh
 	@rm -rf *.egg-info
 	./scripts/setup.sh
+
+# Link agents/ (the checked-in skills and subagents) into each agent tool's
+# discovery directory: .claude/, .agents/, .bravebot/, .cursor/ and .codex/.
+# `make setup` does this too. Idempotent; never replaces a real file.
+link-agents:
+	python3 agents/setup.py link
 
 # Install/update the cron schedules for this project: the review sweeps and the
 # poll for requested reviews. Also removes the review block brave-dev-loop used

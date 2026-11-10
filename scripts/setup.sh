@@ -1,8 +1,8 @@
 #!/bin/bash
 # Setup script for reviewer
 # Fully idempotent — safe to re-run at any time.
-# Creates config.json, .envrc, the org-members cache and the dev virtualenv, checks the
-# reviewer's gh login, and offers to install the cron jobs.
+# Creates config.json, .envrc, the org-members cache and the dev virtualenv, links agents/
+# into each agent tool's discovery directories, checks the reviewer's gh login, and offers to install the cron jobs.
 # Never overwrites an existing file without an explicit confirmation.
 
 set -e
@@ -318,6 +318,20 @@ elif "$SCRIPT_DIR/install-dev-deps.sh" >/dev/null 2>&1; then
 else
   echo "⚠️  Could not create .venv. Run scripts/install-dev-deps.sh to see why."
 fi
+echo ""
+
+# ─── Step 4b: Agent links ────────────────────────────────────────────────────
+#
+# agents/ holds the skills and subagents. The sessions run
+# `python3 .claude/skills/review-prs/select-candidates.py`, and each agent tool looks
+# in its own directory, so those are symlinks (and Codex TOML files) made here.
+
+if python3 "$PROJECT_ROOT/agents/setup.py" link; then
+  echo "✓ agents/ linked into .claude/, .agents/, .bravebot/, .cursor/ and .codex/"
+else
+  echo "⚠️  Linking agents/ failed. Run 'make link-agents' to see why; scheduled reviews need .claude/skills."
+fi
+echo "  (bravebot asks once to vouch for .bravebot/skills; this script does not grant that.)"
 echo ""
 
 # ─── Step 5: Reviewer gh account ─────────────────────────────────────────────

@@ -14,7 +14,7 @@ import pytest
 SCRIPT_PATH = os.path.join(
     os.path.dirname(__file__),
     os.pardir,
-    ".claude",
+    "agents",
     "skills",
     "review-prs",
     "chunk-best-practices.py",

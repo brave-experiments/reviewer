@@ -66,4 +66,9 @@ jobs:
 
       - run: make lint
 
+      # The tests (and the sessions) run the skill scripts through .claude/skills/,
+      # a gitignored symlink into agents/ that `make setup` makes. tests/conftest.py
+      # makes it too; this step fails the job early if the linking itself breaks.
+      - run: python3 agents/setup.py link
+
       - run: make test

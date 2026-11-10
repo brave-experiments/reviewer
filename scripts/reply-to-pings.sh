@@ -44,6 +44,8 @@ SESSION_SECONDS="${REPLY_TO_PINGS_SESSION_SECONDS:-1800}"
 LOCK_DIR="$BOT_DIR/.ignore"
 mkdir -p "$LOCK_DIR"
 
+bot_link_agents
+
 # Exit code the per-thread subshell uses for "someone else has this one", and
 # for "no longer waiting" (pings.py's own 3): neither is a failed reply.
 THREAD_BUSY_RC=75

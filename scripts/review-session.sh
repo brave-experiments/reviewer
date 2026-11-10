@@ -34,6 +34,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/load-config.sh"
 source "$SCRIPT_DIR/lib/review-agent.sh"
 
+bot_link_agents
 SKILL_DIR="${REVIEW_PRS_SKILL_DIR:-$BOT_DIR/.claude/skills/review-prs}"
 MODEL="$BOT_REVIEW_MODEL"
 while [ $# -gt 0 ]; do

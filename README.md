@@ -6,15 +6,15 @@ It runs as a dedicated GitHub reviewer account, with its gh login kept apart fro
 
 ## How a review works
 
-The `review-prs` skill (`.claude/skills/review-prs/`) is a file-based pipeline that keeps the model out of everything a script can do. The skill and subagent definitions sit under `.claude/` because that is the layout both supported agents load them from; nothing in the pipeline depends on which agent runs it.
+The `review-prs` skill (`agents/skills/review-prs/`) is a file-based pipeline that keeps the model out of everything a script can do. The skill and subagent definitions are checked in under `agents/`; `make setup` (or `make link-agents`) symlinks them into the directories the agents load them from (`.claude/skills/review-prs`, `.claude/agents/`, and so on, all gitignored). Nothing in the pipeline depends on which agent runs it.
 
 1. `prepare-review.py` fetches PRs, diffs and comments, makes a git worktree per PR head, and writes one detect prompt per rule chunk plus one for bugs.
-2. Detect subagents (`.claude/agents/review-prs-detect.md`) write candidate findings.
+2. Detect subagents (`agents/agents/review-prs-detect.md`) write candidate findings.
 3. `select-candidates.py` drops the ones that would be dropped anyway and writes one validate prompt per PR.
-4. Validate subagents (`.claude/agents/review-prs-validate.md`) investigate each candidate against the PR's source and keep only what they can prove.
+4. Validate subagents (`agents/agents/review-prs-validate.md`) investigate each candidate against the PR's source and keep only what they can prove.
 5. `collect-results.py` posts, resolves, approves and updates the cache.
 
-`scripts/review-session.sh` drives the whole thing unattended. The agent session holds no GitHub token and runs under a fixed permission set (`scripts/review-session-settings.py`); `prepare-review.py` and `collect-results.py` run outside it and do the talking to GitHub. See `.claude/skills/review-prs/SKILL.md` for the details.
+`scripts/review-session.sh` drives the whole thing unattended. The agent session holds no GitHub token and runs under a fixed permission set (`scripts/review-session-settings.py`); `prepare-review.py` and `collect-results.py` run outside it and do the talking to GitHub. See `agents/skills/review-prs/SKILL.md` for the details.
 
 ## Agents
 
@@ -26,6 +26,8 @@ The `review-prs` skill (`.claude/skills/review-prs/`) is a file-based pipeline t
 | `bravebot` | Runs, but is confined differently and less tightly. |
 
 Other agents (codex, cursor) have no confined headless mode wired in. [docs/review-agents.md](docs/review-agents.md) says how each is confined and what is weaker with bravebot.
+
+Linking is separate from which agent runs the schedule. `agents/setup.py` (run by `make setup` and `make link-agents`) links the checked-in `agents/` into every tool's discovery paths: Claude Code `.claude/`, Codex `.agents/skills` + `.codex/agents` (generated TOML), Cursor `.cursor/`, bravebot `.bravebot/`. The links are gitignored. `reviewer.agent` still accepts only `claude` and `bravebot` for the scheduled sessions (`scripts/lib/review-agent.sh` refuses anything else). The sessions run the skill's scripts through the `.claude/skills/review-prs/` link, so it must exist on the machine that runs them.
 
 ## Docs
 
@@ -40,7 +42,8 @@ Per-project rules (labels, UI paths, extra review guidance) live in `projects/<p
 ## Setup
 
 ```sh
-make setup       # wizard: config.json, .envrc, org-members cache, .venv, reviewer gh login, cron jobs
+make setup       # wizard: config.json, .envrc, org-members cache, .venv, agent links, reviewer gh login, cron jobs
+make link-agents # only the agent links: agents/ into .claude/, .agents/, .bravebot/, .cursor/, .codex/
 ```
 
 Prerequisites: `gh`, `jq`, `python3`, `git`, and either `claude` or `bravebot`. You also need a local clone of the repository whose PRs are reviewed (`project.targetRepoPath`); its `docs/best-practices/` are the rules PRs are checked against.
@@ -60,10 +63,12 @@ make remove-schedules                             # take them out
 ## Develop
 
 ```sh
-make test      # pytest
-make lint      # ruff
-make check     # lint + tests + the security-action scan (make check-reviewdog)
+make test        # pytest (links agents/ first, through tests/conftest.py)
+make lint        # ruff
+make check       # lint + tests + the security-action scan (make check-reviewdog)
 ```
+
+Edit skills and subagents under `agents/`; a new one there is picked up by the next `make link-agents`.
 
 ## Moving from brave-dev-loop
 

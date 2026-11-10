@@ -28,6 +28,19 @@ REVIEWER_BRAVEBOT_REVIEW_TOOLS="read_file,list_files,search,repo_map,read_git,wr
 # A reply session reads a thread and writes one file: no program, no delegate.
 REVIEWER_BRAVEBOT_REPLY_TOOLS="read_file,list_files,search,write_file,edit_file,load_skill,search_skills"
 
+# The sessions load /review-prs, /reply-to-ping and the subagents through .claude/ (or
+# .bravebot/), which are gitignored symlinks into the checked-in agents/. A machine that
+# pulled the commit moving the skills into agents/ has no such links until `make setup`
+# runs, and every scheduled job would then fail, so each session re-makes them first:
+# idempotent, quiet, and it never replaces a real path. Failure is only a warning, since
+# a missing link fails the session loudly on its own.
+bot_link_agents() {
+  [ -f "$BOT_DIR/agents/setup.py" ] || return 0
+  python3 "$BOT_DIR/agents/setup.py" link -q >&2 \
+    || echo "Warning: could not link agents/ (run 'make link-agents')." >&2
+  return 0
+}
+
 # Sets REVIEWER_AGENT_CMD. Returns 2 for an agent that cannot review.
 #
 # `settings` is the JSON review-session-settings.py printed. claude takes it inline;
@@ -54,7 +67,8 @@ bot_review_agent_cmd() {
       [ "$kind" = "reply" ] && tools="$REVIEWER_BRAVEBOT_REPLY_TOOLS"
       # The prompt goes first: bravebot reads --model only after it.
       # --trust-workspace is what lets /review-prs, a skill under the bot
-      # directory's .claude/skills, load at all.
+      # directory's .claude/skills (a symlink into agents/, made by `make setup`),
+      # load at all.
       settings_file=$(mktemp "${TMPDIR:-/tmp}/review-settings.XXXXXX") || return 1
       # Bypass mode ignores the Edit allow rule that confines claude's writes to the
       # work directory, and deny rules still hold. So the confinement is written the

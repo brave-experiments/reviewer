@@ -10,7 +10,10 @@ import pytest
 
 SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), os.pardir, "scripts")
 ROOT_DIR = os.path.join(os.path.dirname(__file__), os.pardir)
-SKILLS_DIR = os.path.join(os.path.dirname(__file__), os.pardir, ".claude", "skills")
+AGENTS_DIR = os.path.join(os.path.dirname(__file__), os.pardir, "agents")
+# The checked-in source. `.claude/skills` is a symlink to it that `agents/setup.py link`
+# makes; the scripts find the repo root by depth, which both paths share.
+SKILLS_DIR = os.path.join(AGENTS_DIR, "skills")
 
 
 # Scripts read config.json from the repo root, so without this the suite tests
@@ -21,6 +24,21 @@ SKILLS_DIR = os.path.join(os.path.dirname(__file__), os.pardir, ".claude", "skil
 os.environ["BOT_CONFIG_FILE"] = os.path.join(
     os.path.dirname(__file__), "config.test.json"
 )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def agent_links():
+    """Create the discovery links once, as `make setup` does.
+
+    Tests that run a script through `.claude/skills/...`, the path the sessions use, need them.
+    Idempotent and quiet, and it never replaces a real path.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "agents_setup", os.path.join(AGENTS_DIR, "setup.py")
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod.link(None)
 
 
 def _load_module(name, path):
