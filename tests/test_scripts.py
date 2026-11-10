@@ -142,15 +142,15 @@ class TestCronBlocks:
 
 
 class TestAsReviewer:
-    """Scheduled reviews act as a second GitHub account. The bot's token is
-    exported into every cron job by .envrc and outranks any gh config directory,
-    so the wrapper has to replace the token itself, and it must refuse rather
-    than fall back to the bot when the reviewer cannot be used."""
+    """Scheduled jobs act as the reviewer account, which is required. A token in
+    the environment outranks any gh config directory, so the wrapper has to
+    replace the token itself, and it must refuse rather than run as whatever
+    account the environment holds when the reviewer cannot be used."""
 
     @staticmethod
-    def _bot(tmp_dir, reviewer=None, login=None, actual=None):
-        """A bot directory with a stub gh whose stored login is `actual`, or
-        none, and whose config names `reviewer`."""
+    def _bot(tmp_dir, reviewer="rev", login=None, actual=None):
+        """A directory with a stub gh whose stored login is `actual`, or none,
+        and whose config names `reviewer` (None leaves reviewer.username unset)."""
         bot = TestProjectSchedules._bot_dir(tmp_dir, "default")
         cfg_dir = os.path.join(tmp_dir, "xdg", "gh-" + (reviewer or "x"))
         os.makedirs(cfg_dir, exist_ok=True)
@@ -160,8 +160,7 @@ class TestAsReviewer:
         path = os.path.join(bot, "config.json")
         with open(path) as f:
             config = json.load(f)
-        if reviewer:
-            config["reviewer"] = {"username": reviewer, "ghConfigDir": cfg_dir}
+        config["reviewer"] = {"username": reviewer, "ghConfigDir": cfg_dir}
         with open(path, "w") as f:
             json.dump(config, f)
         bindir = os.path.join(tmp_dir, "bin")
@@ -184,8 +183,8 @@ class TestAsReviewer:
         env = {
             **os.environ,
             "PATH": bindir + os.pathsep + os.environ["PATH"],
-            "GH_TOKEN": "bot-token",
-            "GH_CONFIG_DIR": "/the/bots/config",
+            "GH_TOKEN": "ambient-token",
+            "GH_CONFIG_DIR": "/the/ambient/config",
         }
         return subprocess.run(
             [
@@ -200,23 +199,26 @@ class TestAsReviewer:
             env=env,
         )
 
-    def test_without_a_reviewer_the_command_runs_as_the_bot(self, tmp_dir):
-        bot, bindir, _ = self._bot(tmp_dir)
+    def test_without_a_reviewer_the_command_is_refused(self, tmp_dir):
+        bot, bindir, _ = self._bot(tmp_dir, None)
         result = self._run(bot, bindir)
-        assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == "bot-token|/the/bots/config"
+        assert result.returncode != 0
+        assert result.stdout == ""
+        assert "reviewer.username" in result.stderr
 
-    def test_with_a_reviewer_the_bots_token_is_replaced(self, tmp_dir):
+    def test_the_ambient_token_is_replaced_by_the_reviewers(self, tmp_dir):
         bot, bindir, cfg_dir = self._bot(tmp_dir, "rev", actual="rev")
         result = self._run(bot, bindir)
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == f"token-of-rev|{cfg_dir}"
 
-    def test_a_reviewer_who_is_not_logged_in_is_not_replaced_by_the_bot(self, tmp_dir):
+    def test_a_reviewer_who_is_not_logged_in_is_not_replaced_by_the_ambient_login(
+        self, tmp_dir
+    ):
         bot, bindir, _ = self._bot(tmp_dir, "rev")
         result = self._run(bot, bindir)
         assert result.returncode == 1
-        assert "bot-token" not in result.stdout
+        assert "ambient-token" not in result.stdout
         assert "make setup" in result.stderr
 
     def test_a_directory_logged_in_as_someone_else_is_refused(self, tmp_dir):
@@ -226,23 +228,30 @@ class TestAsReviewer:
         assert result.stdout == ""
         assert "someone-else" in result.stderr
 
-    @pytest.mark.parametrize("reviewer, expected", [(None, "test-bot"), ("rev", "rev")])
-    def test_review_requests_are_read_for_whoever_reviews(
-        self, tmp_dir, reviewer, expected
-    ):
-        bot, _, cfg_dir = self._bot(tmp_dir, reviewer)
+    def test_the_reviewer_and_its_login_directory_come_from_config(self, tmp_dir):
+        bot, _, cfg_dir = self._bot(tmp_dir, "rev")
         result = subprocess.run(
             [
                 "bash",
                 "-c",
                 f"source {bot}/scripts/lib/load-config.sh && "
-                'echo "$BOT_REVIEW_USERNAME|$BOT_REVIEWER_GH_CONFIG_DIR"',
+                'echo "$REVIEWER_USERNAME|$REVIEWER_GH_CONFIG_DIR"',
             ],
             capture_output=True,
             text=True,
         )
         assert result.returncode == 0, result.stderr
-        assert result.stdout.strip() == f"{expected}|{cfg_dir if reviewer else ''}"
+        assert result.stdout.strip() == f"rev|{cfg_dir}"
+
+    def test_a_config_without_a_reviewer_username_is_rejected(self, tmp_dir):
+        bot, _, _ = self._bot(tmp_dir, None)
+        result = subprocess.run(
+            ["bash", "-c", f"source {bot}/scripts/lib/load-config.sh"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "reviewer.username" in result.stderr
 
     def test_the_default_login_directory_is_under_config(self, tmp_dir):
         bot, _, _ = self._bot(tmp_dir, "rev")
@@ -257,7 +266,7 @@ class TestAsReviewer:
                 "bash",
                 "-c",
                 f"source {bot}/scripts/lib/load-config.sh && "
-                'echo "$BOT_REVIEWER_GH_CONFIG_DIR"',
+                'echo "$REVIEWER_GH_CONFIG_DIR"',
             ],
             capture_output=True,
             text=True,
@@ -298,7 +307,10 @@ class TestProjectSchedules:
                 "defaultBranch": "main",
                 "profile": profile,
             },
-            "bot": {"username": "test-bot", "claudeBin": "/usr/bin/claude"},
+            "reviewer": {
+                "username": "test-reviewer",
+                "claudeBin": "/usr/bin/claude",
+            },
         }
         with open(os.path.join(bot, "config.json"), "w") as f:
             json.dump(config, f)
@@ -732,8 +744,9 @@ class TestProjectSchedules:
         path = os.path.join(bot, "config.json")
         with open(path) as f:
             config = json.load(f)
-        config["bot"]["bravebotBin"] = os.path.join(bindir, "bravebot")
-        config["reviewer"] = {"agent": "bravebot"}
+        config["reviewer"].update(
+            {"bravebotBin": os.path.join(bindir, "bravebot"), "agent": "bravebot"}
+        )
         with open(path, "w") as f:
             json.dump(config, f)
         with open(os.path.join(bindir, "bravebot"), "w") as f:
@@ -743,7 +756,7 @@ class TestProjectSchedules:
             [os.path.join(bot, "scripts", "sync-schedules.sh"), "--print"],
             capture_output=True,
             text=True,
-            env={k: v for k, v in os.environ.items() if k != "BOT_BRAVEBOT_BIN"},
+            env={k: v for k, v in os.environ.items() if k != "REVIEWER_BRAVEBOT_BIN"},
         )
         assert result.returncode == 0, result.stderr
         assert f"PATH=/usr/bin:{bindir}:" in result.stdout
@@ -753,14 +766,14 @@ class TestProjectSchedules:
         path = os.path.join(bot, "config.json")
         with open(path) as f:
             config = json.load(f)
-        config["reviewer"] = {"agent": "codex"}
+        config["reviewer"]["agent"] = "codex"
         with open(path, "w") as f:
             json.dump(config, f)
         result = subprocess.run(
             [os.path.join(bot, "scripts", "sync-schedules.sh"), "--print"],
             capture_output=True,
             text=True,
-            env={k: v for k, v in os.environ.items() if k != "BOT_REVIEW_AGENT"},
+            env={k: v for k, v in os.environ.items() if k != "REVIEWER_AGENT"},
         )
         assert result.returncode == 1
         assert "unsupported agent 'codex'" in result.stderr
@@ -1265,7 +1278,7 @@ class TestReviewQueueWindow:
             f.write("alice\n")
         script = (
             f"BOT_DIR={shlex.quote(os.path.abspath(REPO_ROOT))} BOT_PR_REPO=o/r "
-            "BOT_REVIEW_USERNAME=rev; "
+            "REVIEWER_USERNAME=rev; "
             f"source {shlex.quote(os.path.abspath(REPO_ROOT))}/scripts/lib/review-requests.sh; "
             f"bot_review_requested_prs {limit or ''}"
         )
@@ -1317,7 +1330,7 @@ class TestReviewRequestQueue:
                 "bash",
                 "-c",
                 f"source {os.path.join(SCRIPT_DIR, 'lib', 'load-config.sh')}"
-                ' >/dev/null && printf "%s" "$BOT_REVIEW_USERNAME"',
+                ' >/dev/null && printf "%s" "$REVIEWER_USERNAME"',
             ],
             capture_output=True,
             text=True,

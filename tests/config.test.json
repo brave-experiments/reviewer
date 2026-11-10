@@ -6,26 +6,15 @@
     "issueRepository": "test-org/test-project",
     "defaultBranch": "main",
     "targetRepoPath": "../test-project",
-    "botOwnerGithubHandle": "test-owner",
-    "useFork": true,
-    "profile": "default",
-    "prdMode": "curated"
+    "profile": "default"
   },
-  "bot": {
-    "username": "test-bot",
-    "email": "test-bot@example.com",
-    "sshKeyPath": null,
-    "signingKeyPath": null,
-    "ghAccount": null,
+  "reviewer": {
+    "username": "test-reviewer",
+    "ghConfigDir": null,
     "agent": "claude",
-    "maxConcurrentRuns": 1,
-    "claudeModel": "opus",
     "claudeBin": null,
-    "codexModel": null,
-    "codexBin": null,
-    "cursorModel": null,
-    "cursorBin": null,
-    "ghConfigDir": null
+    "bravebotBin": null,
+    "bravebotModel": null
   },
   "labels": {
     "prLabels": [],

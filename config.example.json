@@ -8,19 +8,13 @@
     "targetRepoPath": "../my-project",
     "profile": "default"
   },
-  "bot": {
-    "username": "my-bot",
-    "sshKeyPath": null,
-    "ghAccount": null,
-    "claudeBin": null,
-    "bravebotModel": null,
-    "bravebotBin": null,
-    "ghConfigDir": null
-  },
   "reviewer": {
-    "username": null,
+    "username": "my-reviewer",
     "ghConfigDir": null,
-    "agent": "claude"
+    "agent": "claude",
+    "claudeBin": null,
+    "bravebotBin": null,
+    "bravebotModel": null
   },
   "labels": {
     "prLabels": [],

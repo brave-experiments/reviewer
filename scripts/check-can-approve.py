@@ -13,7 +13,7 @@ This script is the SINGLE SOURCE OF TRUTH for approval decisions.
 The LLM must not approve without exit code 0 from this script.
 
 Usage:
-    python3 check-can-approve.py <pr-number> <bot-username>
+    python3 check-can-approve.py <pr-number> <reviewer-username>
 """
 
 import argparse
@@ -72,7 +72,9 @@ def gh_graphql(query, variables):
         return None
 
 
-def fetch_pr_data(pr_number, bot_username, repo_owner="brave", repo_name="brave-core"):
+def fetch_pr_data(
+    pr_number, reviewer_username, repo_owner="brave", repo_name="brave-core"
+):
     """Fetch all bot review data: inline threads + reviews.
 
     Returns (head_sha, threads_info, body_comments, already_approved)
@@ -125,7 +127,7 @@ def fetch_pr_data(pr_number, bot_username, repo_owner="brave", repo_name="brave-
         if not first_comments:
             continue
         author = (first_comments[0].get("author") or {}).get("login", "")
-        if author == bot_username:
+        if author == reviewer_username:
             total_threads += 1
             if not thread.get("isResolved", False):
                 unresolved_threads += 1
@@ -164,7 +166,7 @@ def fetch_pr_data(pr_number, bot_username, repo_owner="brave", repo_name="brave-
     body_comments = []
     already_approved = False
     for review in reviews:
-        if review.get("user", {}).get("login") != bot_username:
+        if review.get("user", {}).get("login") != reviewer_username:
             continue
         state = review.get("state", "")
         # Body-level comments: any COMMENTED review with non-empty body,
@@ -203,7 +205,7 @@ def main():
         description="Gate check: can the bot approve this PR?"
     )
     parser.add_argument("pr_number", type=int, help="PR number")
-    parser.add_argument("bot_username", help="Bot's GitHub username")
+    parser.add_argument("reviewer_username", help="The reviewer's GitHub username")
     parser.add_argument("--repo", default=pr_repo, help="owner/repo for PRs")
     parser.add_argument(
         "--reapprove",
@@ -226,7 +228,7 @@ def main():
         repo_owner, repo_name = args.repo.split("/", 1)
 
     head_sha, threads_info, body_comments, already_approved = fetch_pr_data(
-        args.pr_number, args.bot_username, repo_owner, repo_name
+        args.pr_number, args.reviewer_username, repo_owner, repo_name
     )
     if head_sha is None:
         fail("Failed to fetch PR data from GitHub API")

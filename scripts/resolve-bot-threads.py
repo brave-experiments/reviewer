@@ -8,7 +8,7 @@ process that the LLM was unreliable at (consistently added reactions but
 never resolved threads).
 
 Usage:
-    python3 resolve-bot-threads.py <pr-number> <bot-username> [--dry-run]
+    python3 resolve-bot-threads.py <pr-number> <reviewer-username> [--dry-run]
 """
 
 import argparse
@@ -163,7 +163,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Resolve bot review threads on a PR.")
     parser.add_argument("pr_number", type=int, help="PR number")
-    parser.add_argument("bot_username", help="Bot's GitHub username")
+    parser.add_argument("reviewer_username", help="The reviewer's GitHub username")
     parser.add_argument("--repo", default=default_repo, help="owner/repo for PRs")
     parser.add_argument(
         "--dry-run",
@@ -216,7 +216,7 @@ def main():
             continue
         first = first_comments[0]
         author = (first.get("author") or {}).get("login", "")
-        if author == args.bot_username:
+        if author == args.reviewer_username:
             db_id = first.get("databaseId")
             if db_id:
                 bot_threads[db_id] = {
@@ -231,7 +231,7 @@ def main():
         reply_to = comment.get("in_reply_to_id")
         if reply_to and reply_to in bot_threads:
             user = (comment.get("user") or {}).get("login", "")
-            if user != args.bot_username:
+            if user != args.reviewer_username:
                 # Keep the latest reply per bot comment
                 existing = replies_to_bot.get(reply_to)
                 if not existing or comment["id"] > existing["id"]:

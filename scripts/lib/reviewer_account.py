@@ -1,6 +1,6 @@
 """Run a review-prs script as the configured reviewer account.
 
-A review posted as the bot cannot approve a PR the bot opened. It can only
+A review posted by an account that opened the PR cannot approve it. It can only
 comment, and the commit is then cached as reviewed, so a later run as the
 reviewer skips the PR and nothing ever approves it. Scheduled jobs go through
 scripts/as-reviewer.sh; a /review-prs typed into a session did not.
@@ -12,7 +12,7 @@ import sys
 
 from lib.load_config import bot_dir, get_config
 
-GUARD = "BOT_REVIEWER_REEXECED"
+GUARD = "REVIEWER_REEXECED"
 
 
 def current_login():
@@ -26,14 +26,15 @@ def current_login():
 
 
 def ensure_reviewer(config, log, login=None):
-    """Return when running as the reviewer, or when none is configured.
+    """Return when running as the reviewer.
 
     Otherwise run the same command through as-reviewer.sh, which stops
-    rather than fall back to the bot, and exit with its status.
+    rather than run as anyone else, and exit with its status.
     """
     reviewer = get_config(config, "reviewer.username") or ""
     if not reviewer:
-        return
+        log("ERROR: reviewer.username is not set in config.json. Run 'make setup'.")
+        sys.exit(1)
     login = current_login() if login is None else login
     if login.lower() == reviewer.lower():
         return

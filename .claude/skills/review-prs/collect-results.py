@@ -492,12 +492,12 @@ def main():
         log(f"ERROR: failed to load manifest: {e}")
         sys.exit(1)
 
-    bot_username = manifest.get("bot_username", "")
+    reviewer_username = manifest.get("reviewer_username", "")
     pr_repo = manifest.get("pr_repo", "")
     auto_mode = args.auto or manifest.get("auto_mode", False)
 
-    if not bot_username or not pr_repo:
-        log("ERROR: manifest missing bot_username or pr_repo")
+    if not reviewer_username or not pr_repo:
+        log("ERROR: manifest missing reviewer_username or pr_repo")
         sys.exit(1)
 
     # Print cached PRs and progress lines first (before post-review output)
@@ -560,8 +560,8 @@ def main():
         os.path.join(SCRIPT_DIR, "post-review.py"),
         "--pr-repo",
         pr_repo,
-        "--bot-username",
-        bot_username,
+        "--reviewer-username",
+        reviewer_username,
         "--input",
         input_path,
     ]

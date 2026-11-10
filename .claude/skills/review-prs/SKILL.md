@@ -75,7 +75,7 @@ Parse the stdout JSON to get `work_dir`.
 Read the manifest file at `{work_dir}/manifest.json`. It contains:
 
 - **`auto_mode`**: whether to post without approval
-- **`bot_username`**: the bot's GitHub username
+- **`reviewer_username`**: the reviewer's GitHub username
 - **`pr_repo`**: the target PR repository
 - **`target_repo_path`**: absolute path to the local target repo checkout
 - **`fetch_summary`**: stats on how many PRs were fetched/filtered/skipped

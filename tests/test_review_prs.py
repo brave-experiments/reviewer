@@ -677,7 +677,7 @@ class TestProcessPr:
         os.makedirs(work)
         manifest = os.path.join(work, "manifest.json")
         with open(manifest, "w") as f:
-            json.dump({"pr_repo": "o/r", "bot_username": "bot", "prs": [entry]}, f)
+            json.dump({"pr_repo": "o/r", "reviewer_username": "bot", "prs": [entry]}, f)
         monkeypatch.setattr(sys, "argv", ["select-candidates.py", "--work-dir", work])
         sel.main()
         capsys.readouterr()
@@ -897,7 +897,7 @@ class TestProcessPr:
             assert f.read() == "The author's words."
 
     def test_the_validator_sees_the_guidance_it_judges_against(self, prep):
-        ctx = {"number": 1, "title": "t", "bot_username": "bot"}
+        ctx = {"number": 1, "title": "t", "reviewer_username": "bot"}
         args = ([{"id": "c1"}], [], "", {}, [], "/src", "/out.json")
         plain = prep.build_validate_prompt(ctx, *args)
         assert "Project review guidance" not in plain
@@ -1131,7 +1131,7 @@ class TestCleanReviewOfTheBotsOwnPr:
 
 
 class TestReviewerAccount:
-    """A review run as the bot cannot approve the bot's own PR, and it caches
+    """A review run as the PR's author cannot approve it, and it caches
     the commit as reviewed, so a later run as the reviewer skips it."""
 
     @pytest.fixture
@@ -1151,7 +1151,7 @@ class TestReviewerAccount:
         )
         return calls
 
-    def test_the_bots_login_is_rerun_through_the_wrapper(self, ra, execs):
+    def test_another_login_is_rerun_through_the_wrapper(self, ra, execs):
         with pytest.raises(SystemExit) as stop:
             ra.ensure_reviewer({"reviewer": {"username": "rev"}}, lambda m: None, "bot")
         assert stop.value.code == 0
@@ -1163,12 +1163,16 @@ class TestReviewerAccount:
         ra.ensure_reviewer({"reviewer": {"username": "Rev"}}, lambda m: None, "rev")
         assert execs == []
 
-    def test_no_reviewer_configured_runs_as_the_bot(self, ra, execs):
-        ra.ensure_reviewer({}, lambda m: None, "bot")
-        ra.ensure_reviewer({"reviewer": {"username": None}}, lambda m: None, "bot")
+    def test_no_reviewer_configured_stops_the_run(self, ra, execs):
+        logged = []
+        for config in ({}, {"reviewer": {"username": None}}):
+            with pytest.raises(SystemExit) as stop:
+                ra.ensure_reviewer(config, logged.append, "someone")
+            assert stop.value.code == 1
+        assert len(logged) == 2 and all("reviewer.username" in m for m in logged)
         assert execs == []
 
-    def test_a_wrapper_that_leaves_the_bot_in_force_stops_the_run(
+    def test_a_wrapper_that_leaves_another_login_in_force_stops_the_run(
         self, ra, execs, monkeypatch
     ):
         monkeypatch.setenv(ra.GUARD, "1")
@@ -1181,7 +1185,7 @@ class TestPrRemote:
     def test_ignores_a_remote_that_only_pushes_to_the_repo(self, prep, monkeypatch):
         repo = prep.PR_REPO
         out = (
-            f"origin\tgit@github.com:netzenbot/fork.git (fetch)\n"
+            f"origin\tgit@github.com:someone/fork.git (fetch)\n"
             f"origin\tssh://git@github.com/{repo}.git (push)\n"
             f"upstream\tgit@github.com:{repo}.git (fetch)\n"
             f"upstream\tssh://git@github.com/{repo}.git (push)\n"
@@ -1352,7 +1356,7 @@ class TestSelectCandidates:
                 }
             )
         with open(os.path.join(work, "manifest.json"), "w") as f:
-            json.dump({"pr_repo": "o/r", "bot_username": "bot", "prs": prs}, f)
+            json.dump({"pr_repo": "o/r", "reviewer_username": "bot", "prs": prs}, f)
 
         monkeypatch.setattr(sys, "argv", ["select-candidates.py", "--work-dir", work])
         sel.main()
@@ -1977,7 +1981,7 @@ class TestEarlierComments:
 
 class TestEarlierCommentsHandoff:
     def test_the_validator_is_asked_about_each_thread(self, prep):
-        ctx = {"number": 1, "title": "t", "bot_username": "bot"}
+        ctx = {"number": 1, "title": "t", "reviewer_username": "bot"}
         threads = [{"id": "t1", "file": "a.rs", "line": 3, "comment": "Fix X."}]
         args = ([], [], "", {}, [], "/src", "/out.json")
         prompt = prep.build_validate_prompt(ctx, *args, threads)
@@ -2010,7 +2014,7 @@ class TestEarlierCommentsHandoff:
             "subagent_prompts": [{"chunk_id": "cpp.md_0", "results_file": results}],
         }
         with open(os.path.join(work, "manifest.json"), "w") as f:
-            json.dump({"pr_repo": "o/r", "bot_username": "bot", "prs": [pr]}, f)
+            json.dump({"pr_repo": "o/r", "reviewer_username": "bot", "prs": [pr]}, f)
         monkeypatch.setattr(sys, "argv", ["select-candidates.py", "--work-dir", work])
         sel.main()
         out = json.loads(capsys.readouterr().out)
@@ -2217,7 +2221,7 @@ class TestBugPassReadsTheSource:
             "base_ref": "master",
             "has_approval": False,
             "prior_comments": "",
-            "bot_username": "bot",
+            "reviewer_username": "bot",
             "guidance": [],
         }
 

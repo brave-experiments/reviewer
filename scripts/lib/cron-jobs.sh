@@ -3,7 +3,7 @@
 #
 # The jobs themselves live in projects/<profile>/schedules.sh, one file per
 # project, and every line in them is built from these functions so that every
-# job gets the same prologue: the bot directory, the bot identity, its gate, and
+# job gets the same prologue: the repo directory, the loaded config, its gate, and
 # a hard reset of this repo to the branch the jobs run from.
 #
 # sync-schedules.sh sources this file and sets the variables the functions
@@ -58,8 +58,8 @@ bot_cron_review() {
 }
 
 # Wrap a command so it runs as the reviewer account (scripts/as-reviewer.sh).
-# Always emitted, configured or not -- the wrapper reads config.json when the
-# job fires, so adding a reviewer later takes effect without re-syncing cron.
+# Always wrapped: as-reviewer.sh reads config.json when the job fires and stops
+# if reviewer.username is unset or not logged in.
 #
 #   bot_cron_as_reviewer '<command>'
 bot_cron_as_reviewer() {

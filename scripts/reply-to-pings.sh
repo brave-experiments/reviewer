@@ -50,12 +50,12 @@ THREAD_BUSY_RC=75
 GONE_RC=3
 
 if ! PINGS=$(bot_ping_queue); then
-  echo "Could not query pings for $BOT_REVIEW_USERNAME." >&2
+  echo "Could not query pings for $REVIEWER_USERNAME." >&2
   exit 1
 fi
 
 if [ -z "$PINGS" ]; then
-  echo "No pings for $BOT_REVIEW_USERNAME — nothing to do."
+  echo "No pings for $REVIEWER_USERNAME — nothing to do."
   exit 0
 fi
 
@@ -88,8 +88,7 @@ reply_one() {
   [ -n "${BOT_TARGET_REPO_DIR:-}" ] && [ -d "$BOT_TARGET_REPO_DIR" ] && add_dirs+=("$BOT_TARGET_REPO_DIR")
 
   settings=$(python3 "$SCRIPT_DIR/review-session-settings.py" --reply --work-dir "$work" \
-    ${BOT_GH_CONFIG_DIR:+--deny-read "$BOT_GH_CONFIG_DIR"} \
-    ${BOT_REVIEWER_GH_CONFIG_DIR:+--deny-read "$BOT_REVIEWER_GH_CONFIG_DIR"} \
+    ${REVIEWER_GH_CONFIG_DIR:+--deny-read "$REVIEWER_GH_CONFIG_DIR"} \
     ${GH_CONFIG_DIR:+--deny-read "$GH_CONFIG_DIR"}) || { rm -rf "$work" "$no_gh"; return 1; }
 
   # No token, and an empty gh config directory so gh cannot fall back to the
@@ -102,9 +101,9 @@ reply_one() {
     exec env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN \
       GH_CONFIG_DIR="$no_gh" \
       "$SCRIPT_DIR/timeout-tree.sh" "$SESSION_SECONDS" \
-      "${BOT_REVIEW_AGENT_CMD[@]}" </dev/null
+      "${REVIEWER_AGENT_CMD[@]}" </dev/null
   ) || echo "The reply session for $repo#$number exited $?; posting what it wrote." >&2
-  [ -z "$BOT_REVIEW_AGENT_TMP" ] || rm -f "$BOT_REVIEW_AGENT_TMP"
+  [ -z "$REVIEWER_AGENT_TMP" ] || rm -f "$REVIEWER_AGENT_TMP"
 
   python3 "$PINGS_PY" post "${BOT_PING_ARGS[@]}" --work-dir "$work"
   rc=$?
@@ -140,7 +139,7 @@ while IFS=$'\t' read -r REPO NUMBER KIND COMMENT WHO; do
   RC=0
   (
     bot_acquire_lock "$LOCK_DIR/.ping-$SLUG.lock" || exit "$THREAD_BUSY_RC"
-    echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] answering $THREAD — $WHO pinged $BOT_REVIEW_USERNAME in a $KIND"
+    echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] answering $THREAD — $WHO pinged $REVIEWER_USERNAME in a $KIND"
     reply_one "$REPO" "$NUMBER" "$COMMENT" 200>&- </dev/null
   ) || RC=$?
 

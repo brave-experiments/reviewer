@@ -26,13 +26,12 @@ def fake_agent(tmp_dir, name="bravebot"):
     return path
 
 
-def render(tmp_dir, profile="bravebot", bot=None, reviewer=None, group=None):
+def render(tmp_dir, profile="bravebot", reviewer=None, group=None):
     root = Schedules._bot_dir(tmp_dir, profile)
     path = os.path.join(root, "config.json")
     with open(path) as f:
         config = json.load(f)
-    config["bot"].update(bot or {})
-    config["reviewer"] = reviewer or {}
+    config["reviewer"].update(reviewer or {})
     with open(path, "w") as f:
         json.dump(config, f)
     args = [os.path.join(root, "scripts", "sync-schedules.sh"), "--print"]
@@ -68,8 +67,7 @@ def test_a_review_agent_is_on_the_path_but_not_on_any_line(tmp_dir):
     claude_only = render(tmp_dir, group="review").stdout
     out = render(
         tmp_dir,
-        bot={"bravebotBin": binary},
-        reviewer={"agent": "bravebot"},
+        reviewer={"bravebotBin": binary, "agent": "bravebot"},
         group="review",
     ).stdout
     assert os.path.dirname(binary) in path_line(out).split("=", 1)[1].split(":")
@@ -82,11 +80,11 @@ def test_a_review_agent_in_the_claude_directory_adds_no_path_entry(tmp_dir):
     directory = os.path.dirname(fake_agent(tmp_dir))
     result = render(
         tmp_dir,
-        bot={
+        reviewer={
             "claudeBin": os.path.join(directory, "claude"),
             "bravebotBin": os.path.join(directory, "bravebot"),
+            "agent": "bravebot",
         },
-        reviewer={"agent": "bravebot"},
     )
     assert result.returncode == 0, result.stderr
     assert path_line(result.stdout).count(directory) == 1
@@ -113,27 +111,27 @@ def test_the_environment_does_not_choose_the_agent_the_crontab_is_built_for(tmp_
         [os.path.join(root, "scripts", "sync-schedules.sh"), "--print"],
         capture_output=True,
         text=True,
-        env={"PATH": "/usr/bin:/bin", "HOME": tmp_dir, "BOT_REVIEW_AGENT": "nope"},
+        env={"PATH": "/usr/bin:/bin", "HOME": tmp_dir, "REVIEWER_AGENT": "nope"},
     )
     assert result.returncode == 0, result.stderr
 
 
 def review_cmd(tmp_dir, agent, kind="review", extra_env=None):
-    """BOT_REVIEW_AGENT_CMD, one word to a line, as review-agent.sh builds it."""
+    """REVIEWER_AGENT_CMD, one word to a line, as review-agent.sh builds it."""
     root = Schedules._bot_dir(tmp_dir, "default")
     script = (
         f'source "{root}/scripts/lib/load-config.sh"\n'
         f'source "{root}/scripts/lib/review-agent.sh"\n'
         f'bot_review_agent_cmd {kind} "/review-prs --work-dir W" sonnet \'{{"permissions":{{"deny":[]}}}}\' '
         f'"{tmp_dir}/work" "{tmp_dir}/target"\n'
-        'printf "%s\\n" "${BOT_REVIEW_AGENT_CMD[@]}"\n'
-        'echo "TMP=$BOT_REVIEW_AGENT_TMP"\n'
+        'printf "%s\\n" "${REVIEWER_AGENT_CMD[@]}"\n'
+        'echo "TMP=$REVIEWER_AGENT_TMP"\n'
     )
     env = {
         "PATH": "/usr/bin:/bin",
         "HOME": tmp_dir,
-        "BOT_REVIEW_AGENT": agent,
-        "BOT_BRAVEBOT_BIN": "/opt/bravebot",
+        "REVIEWER_AGENT": agent,
+        "REVIEWER_BRAVEBOT_BIN": "/opt/bravebot",
         **(extra_env or {}),
     }
     return subprocess.run(
@@ -171,11 +169,11 @@ def test_bravebot_reviews_without_a_fetch_tool(tmp_dir):
 
 def test_bravebot_reviews_never_get_the_claude_model_alias(tmp_dir):
     """`--model sonnet` makes bravebot fail with BB1003 when the operator's own
-    service is configured; with no bot.bravebotModel it names no model at all."""
+    service is configured; with no reviewer.bravebotModel it names no model at all."""
     out = review_cmd(tmp_dir, "bravebot").stdout.splitlines()
     assert "--model" not in out and "sonnet" not in out
     out = review_cmd(
-        tmp_dir, "bravebot", extra_env={"BOT_BRAVEBOT_MODEL": "my-model"}
+        tmp_dir, "bravebot", extra_env={"REVIEWER_BRAVEBOT_MODEL": "my-model"}
     ).stdout.splitlines()
     assert out[out.index("--model") + 1] == "my-model"
 

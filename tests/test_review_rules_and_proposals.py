@@ -197,7 +197,7 @@ INDEX = [
 
 
 class TestValidatorPrompt:
-    CTX = {"number": 1, "title": "t", "bot_username": "bot"}
+    CTX = {"number": 1, "title": "t", "reviewer_username": "bot"}
     ARGS = ([{"id": "c1"}], [], "", {}, [], "/src", "/out.json")
 
     def build(self, prep, **ctx):

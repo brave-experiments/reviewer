@@ -2,14 +2,14 @@
 
 `reviewer.agent` in `config.json` (set by `make setup`) picks the agent that runs the
 scheduled `/review-prs` sweeps, the review-request poll and the ping replies. It is
-independent of `bot.agent`, which is what `./run.sh` drives.
+independent of any other agent setting.
 
 | Value | Status |
 |---|---|
 | `claude` (default) | Confined by an allowlist. |
 | `bravebot` | Runs, but is confined differently, and less tightly. See below. |
 
-`BOT_REVIEW_AGENT` in the environment overrides the key, as `BOT_AGENT` does `bot.agent`.
+`REVIEWER_AGENT` in the environment overrides the key.
 Only `claude` and `bravebot` are accepted; `codex` and `cursor` have no confined headless
 mode wired in here.
 

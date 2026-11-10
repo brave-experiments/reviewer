@@ -99,7 +99,7 @@ def rule_text(rule_link, bp_dir):
     return None
 
 
-def select(pr, violations, existing_comments, bp_dir, bot_username=None):
+def select(pr, violations, existing_comments, bp_dir, reviewer_username=None):
     """The candidates post-review.py would still post, capped at CANDIDATE_LIMIT."""
     violations = sorted(
         violations,
@@ -117,7 +117,7 @@ def select(pr, violations, existing_comments, bp_dir, bot_username=None):
         known.append(v)
     violations = _post.deduplicate_batch_violations(known)
     violations = _post.deduplicate_violations(
-        violations, existing_comments, bot_username
+        violations, existing_comments, reviewer_username
     )
     kept, _ = _post.prioritize_violations(violations, limit=CANDIDATE_LIMIT)
     return kept
@@ -174,7 +174,7 @@ def docs_dir_in_repo(bp_dir):
     return "" if rel.startswith("..") else rel
 
 
-def write_validator(pr, candidates, bot_username, bp_dir, threads=()):
+def write_validator(pr, candidates, reviewer_username, bp_dir, threads=()):
     pr_work_dir = os.path.dirname(pr["file_hashes_file"])
     numbered = []
     for i, v in enumerate(candidates, 1):
@@ -199,7 +199,7 @@ def write_validator(pr, candidates, bot_username, bp_dir, threads=()):
         "base_ref": pr.get("baseRefName", ""),
         "has_approval": pr.get("hasApproval", False),
         "prior_comments": prior,
-        "bot_username": bot_username,
+        "reviewer_username": reviewer_username,
         "guidance": _prep.REVIEW_GUIDANCE,
         "link_rules": _prep.REVIEW_LINK_RULES,
         "propose": _prep.REVIEW_PROPOSE_PRACTICES,
@@ -247,7 +247,7 @@ def main():
     with open(manifest_path) as f:
         manifest = json.load(f)
     repo = manifest["pr_repo"]
-    bot_username = manifest["bot_username"]
+    reviewer_username = manifest["reviewer_username"]
 
     validators = []
     incomplete = []
@@ -269,7 +269,7 @@ def main():
             incomplete.append(number)
             continue
         existing = _post.fetch_existing_comments(repo, number) if violations else []
-        candidates = select(pr, violations, existing, _prep.BP_DIR, bot_username)
+        candidates = select(pr, violations, existing, _prep.BP_DIR, reviewer_username)
         pr["detected"] = len(violations)
         log(f"PR #{number}: {len(violations)} detected, {len(candidates)} to validate")
         threads = load_open_threads(pr)
@@ -277,7 +277,7 @@ def main():
             pr["validation"] = None
             continue
         pr["validation"] = write_validator(
-            pr, candidates, bot_username, _prep.BP_DIR, threads
+            pr, candidates, reviewer_username, _prep.BP_DIR, threads
         )
         validators.append({"pr": number, **pr["validation"]})
 

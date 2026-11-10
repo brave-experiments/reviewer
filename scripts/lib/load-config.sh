@@ -7,11 +7,11 @@
 # Exports:
 #   BOT_PROJECT_NAME, BOT_ORG, BOT_PR_REPO, BOT_ISSUE_REPO, BOT_DEFAULT_BRANCH,
 #   BOT_PROFILE, BOT_PROFILE_DIR,
-#   BOT_USERNAME, BOT_SSH_KEY_PATH, BOT_GH_ACCOUNT, BOT_GH_CONFIG_DIR,
-#   BOT_REVIEWER_USERNAME, BOT_REVIEWER_GH_CONFIG_DIR, BOT_REVIEW_USERNAME,
-#   BOT_REVIEW_AGENT (reviewer.agent: claude | bravebot; the agent scheduled reviews run),
-#   BOT_REVIEW_MODEL, BOT_AGENT_TOOLS,
-#   BOT_CLAUDE_BIN, BOT_BRAVEBOT_MODEL, BOT_BRAVEBOT_BIN, BOT_BP_DOCS_DIR,
+#   REVIEWER_USERNAME (reviewer.username, required: the one GitHub account the
+#   scheduled jobs act as), REVIEWER_GH_CONFIG_DIR (its gh config directory),
+#   REVIEWER_AGENT (reviewer.agent: claude | bravebot; the agent scheduled reviews run),
+#   REVIEWER_CLAUDE_BIN, REVIEWER_BRAVEBOT_BIN, REVIEWER_BRAVEBOT_MODEL,
+#   BOT_REVIEW_MODEL, BOT_AGENT_TOOLS, BOT_BP_DOCS_DIR,
 #   BOT_TARGET_REPO_DIR (absolute; prefer over the raw BOT_TARGET_REPO_PATH)
 #
 # Also provides:
@@ -105,25 +105,17 @@ BOT_PROFILE_CONFIGURED=$(bot_config '.project.profile')
 BOT_PROFILE="${BOT_PROFILE_CONFIGURED:-default}"
 BOT_PROFILE_DIR="$BOT_DIR/projects/$BOT_PROFILE"
 
-# The identity the target-repo sync and the fallback reviewer act as.
-BOT_USERNAME=$(bot_config '.bot.username')
-BOT_SSH_KEY_PATH=$(bot_config '.bot.sshKeyPath')
-BOT_GH_ACCOUNT=$(bot_config '.bot.ghAccount')
-BOT_GH_CONFIG_DIR=$(bot_config '.bot.ghConfigDir')
-
-# The account scheduled /review-prs jobs run as (scripts/as-reviewer.sh).
-# Empty means there is none and those jobs run as bot.username. Its gh login
-# lives in a config directory of its own, under ~/.config unless config.json
-# says otherwise, so it never enters the machine owner's gh config.
-BOT_REVIEWER_USERNAME=$(bot_config '.reviewer.username')
-BOT_REVIEWER_GH_CONFIG_DIR=$(bot_config '.reviewer.ghConfigDir')
-if [ -n "$BOT_REVIEWER_USERNAME" ] && [ -z "$BOT_REVIEWER_GH_CONFIG_DIR" ]; then
-  BOT_REVIEWER_GH_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gh-$BOT_REVIEWER_USERNAME"
+# The account every scheduled job acts as (scripts/as-reviewer.sh), and the login
+# the review-request queue and the ping queue are asked about. Required. Its gh
+# login lives in a config directory of its own, under ~/.config unless
+# config.json says otherwise, so it never enters the machine owner's gh config.
+REVIEWER_USERNAME=$(bot_config '.reviewer.username')
+REVIEWER_GH_CONFIG_DIR=$(bot_config '.reviewer.ghConfigDir')
+if [ -n "$REVIEWER_USERNAME" ] && [ -z "$REVIEWER_GH_CONFIG_DIR" ]; then
+  REVIEWER_GH_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gh-$REVIEWER_USERNAME"
 fi
-# The login the review-request queue is asked about: whoever reviews.
-BOT_REVIEW_USERNAME="${BOT_REVIEWER_USERNAME:-$BOT_USERNAME}"
 
-BOT_CLAUDE_BIN=$(bot_config '.bot.claudeBin')
+REVIEWER_CLAUDE_BIN=$(bot_config '.reviewer.claudeBin')
 
 # --allowedTools for an unattended agent session. Every caller uses this one
 # value: a job started with a shorter list than the crontab's fails somewhere
@@ -135,15 +127,15 @@ BOT_AGENT_TOOLS="Bash,Read,Glob,Grep,Write,Edit,Task,WebFetch"
 # needs no Opus; on a large sweep its own context is re-read on every turn.
 BOT_REVIEW_MODEL="${BOT_REVIEW_MODEL:-sonnet}"
 
-# Agent for a scheduled /review-prs session or ping reply. BOT_REVIEW_AGENT in
+# Agent for a scheduled /review-prs session or ping reply. REVIEWER_AGENT in
 # the environment wins over reviewer.agent. See scripts/lib/review-agent.sh.
-_BOT_REVIEW_AGENT_ENV="${BOT_REVIEW_AGENT:-}"
-BOT_REVIEW_AGENT=$(bot_config '.reviewer.agent')
-if [ -n "$_BOT_REVIEW_AGENT_ENV" ]; then
-  BOT_REVIEW_AGENT="$_BOT_REVIEW_AGENT_ENV"
+_REVIEWER_AGENT_ENV="${REVIEWER_AGENT:-}"
+REVIEWER_AGENT=$(bot_config '.reviewer.agent')
+if [ -n "$_REVIEWER_AGENT_ENV" ]; then
+  REVIEWER_AGENT="$_REVIEWER_AGENT_ENV"
 fi
-unset _BOT_REVIEW_AGENT_ENV
-BOT_REVIEW_AGENT="${BOT_REVIEW_AGENT:-claude}"
+unset _REVIEWER_AGENT_ENV
+REVIEWER_AGENT="${REVIEWER_AGENT:-claude}"
 
 BOT_BP_DOCS_DIR=$(bot_config '.bestPractices.docsDir')
 
@@ -157,7 +149,7 @@ _missing=""
 [ -z "$BOT_ORG" ] && _missing="$_missing project.org"
 [ -z "$BOT_PR_REPO" ] && _missing="$_missing project.prRepository"
 [ -z "$BOT_ISSUE_REPO" ] && _missing="$_missing project.issueRepository"
-[ -z "$BOT_USERNAME" ] && _missing="$_missing bot.username"
+[ -z "$REVIEWER_USERNAME" ] && _missing="$_missing reviewer.username"
 if [ -n "$_missing" ]; then
   echo "Error: Missing required config values in $BOT_CONFIG_FILE:$_missing" >&2
   echo "  Run 'make setup' or edit config.json directly." >&2
@@ -165,34 +157,29 @@ if [ -n "$_missing" ]; then
 fi
 
 # Fall back to 'claude' if claudeBin is not set
-if [ -z "$BOT_CLAUDE_BIN" ]; then
-  BOT_CLAUDE_BIN="$(which claude 2>/dev/null || echo "claude")"
+if [ -z "$REVIEWER_CLAUDE_BIN" ]; then
+  REVIEWER_CLAUDE_BIN="$(which claude 2>/dev/null || echo "claude")"
 fi
 
 # bravebot's binary and model come from the environment or from
-# bot.bravebotBin / bot.bravebotModel (written by `make setup`, because cron's
-# PATH has no nvm directory for `which` to find it in).
-if [ -z "${BOT_BRAVEBOT_BIN:-}" ]; then
-  BOT_BRAVEBOT_BIN=$(bot_config '.bot.bravebotBin')
+# reviewer.bravebotBin / reviewer.bravebotModel (written by `make setup`, because
+# cron's PATH has no nvm directory for `which` to find it in).
+if [ -z "${REVIEWER_BRAVEBOT_BIN:-}" ]; then
+  REVIEWER_BRAVEBOT_BIN=$(bot_config '.reviewer.bravebotBin')
 fi
-if [ -z "${BOT_BRAVEBOT_BIN:-}" ]; then
-  BOT_BRAVEBOT_BIN="$(which bravebot 2>/dev/null || echo "bravebot")"
+if [ -z "${REVIEWER_BRAVEBOT_BIN:-}" ]; then
+  REVIEWER_BRAVEBOT_BIN="$(which bravebot 2>/dev/null || echo "bravebot")"
 fi
-if [ -z "${BOT_BRAVEBOT_MODEL:-}" ]; then
-  BOT_BRAVEBOT_MODEL=$(bot_config '.bot.bravebotModel')
+if [ -z "${REVIEWER_BRAVEBOT_MODEL:-}" ]; then
+  REVIEWER_BRAVEBOT_MODEL=$(bot_config '.reviewer.bravebotModel')
 fi
-BOT_BRAVEBOT_MODEL="${BOT_BRAVEBOT_MODEL:-}"
-
-# The gh account defaults to the bot's GitHub username.
-if [ -z "$BOT_GH_ACCOUNT" ]; then
-  BOT_GH_ACCOUNT="$BOT_USERNAME"
-fi
+REVIEWER_BRAVEBOT_MODEL="${REVIEWER_BRAVEBOT_MODEL:-}"
 
 export BOT_DIR BOT_CONFIG_FILE
 export BOT_PROJECT_NAME BOT_ORG BOT_PR_REPO BOT_ISSUE_REPO BOT_DEFAULT_BRANCH BOT_TARGET_REPO_PATH BOT_TARGET_REPO_DIR
 export BOT_PROFILE BOT_PROFILE_DIR
-export BOT_USERNAME BOT_SSH_KEY_PATH BOT_GH_ACCOUNT BOT_GH_CONFIG_DIR
-export BOT_REVIEWER_USERNAME BOT_REVIEWER_GH_CONFIG_DIR BOT_REVIEW_USERNAME
-export BOT_CLAUDE_BIN BOT_AGENT_TOOLS BOT_REVIEW_MODEL BOT_REVIEW_AGENT
-export BOT_BRAVEBOT_MODEL BOT_BRAVEBOT_BIN
+export REVIEWER_USERNAME REVIEWER_GH_CONFIG_DIR
+export REVIEWER_CLAUDE_BIN REVIEWER_AGENT
+export REVIEWER_BRAVEBOT_MODEL REVIEWER_BRAVEBOT_BIN
+export BOT_AGENT_TOOLS BOT_REVIEW_MODEL
 export BOT_BP_DOCS_DIR BOT_BP_DOCS_DIR_ABS

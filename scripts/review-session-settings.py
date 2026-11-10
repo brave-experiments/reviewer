@@ -10,7 +10,7 @@ refused instead of asked about. The session reads untrusted text (the PR's
 diff, description and source tree), so it is held to what the skill's middle
 steps need and nothing else:
 
-- reads only inside its working directories: the bot directory, where it is
+- reads only inside its working directories: the repo directory, where it is
   started, and the run's work directory, which the wrapper adds;
 - writes only inside the work directory;
 - one script, select-candidates.py, through Bash, plus the read-only commands
@@ -22,7 +22,7 @@ The wrapper starts the session without a GitHub token, and prepare-review.py
 and collect-results.py run outside it, so nothing in it can post or push. The
 read-only commands still read files, though, so the places a credential lives
 on this machine are denied outright, even where they fall inside a working
-directory: `.envrc` is in the bot directory itself.
+directory: `.envrc` is in the reviewer directory itself.
 """
 
 import argparse
@@ -31,13 +31,12 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lib.load_config import get_config, load_config
 
 BOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SELECT = ".claude/skills/review-prs/select-candidates.py"
 
 # Credentials in the operator's home directory: git's plaintext store, gh's
-# config directories (the bot's and the reviewer's), ssh keys, and Claude
+# config directories (the reviewer's and the operator's), ssh keys, and Claude
 # Code's own settings, which can hold an API key.
 HOME_SECRETS = (
     ".git-credentials",
@@ -94,9 +93,6 @@ def main():
     )
     args = parser.parse_args()
     deny = list(args.deny_read)
-    key = get_config(load_config(), "bot.sshKeyPath")
-    if key:
-        deny.append(os.path.expanduser(key))
     home = os.path.expanduser("~")
     print(
         json.dumps(

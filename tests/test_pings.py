@@ -424,17 +424,14 @@ def _names():
         [
             "bash", "-c",
             f"source {os.path.join(SCRIPTS_DIR, 'lib', 'load-config.sh')} >/dev/null"
-            ' && printf "%s\\n" "$BOT_REVIEW_USERNAME" "$BOT_USERNAME" "${BOT_REVIEWER_USERNAME:-}"'
-            ' "$BOT_PR_REPO" "$BOT_ISSUE_REPO"',
+            ' && printf "%s\\n" "$REVIEWER_USERNAME" "$BOT_PR_REPO" "$BOT_ISSUE_REPO"',
         ],
         capture_output=True, text=True, check=True,
     ).stdout.split("\n")  # fmt: skip
     return {
         "login": out[0],
-        "bot": out[1],
-        "reviewer": out[2],
-        "pr_repo": out[3],
-        "issue_repo": out[4],
+        "pr_repo": out[1],
+        "issue_repo": out[2],
     }
 
 

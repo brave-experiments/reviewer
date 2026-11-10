@@ -11,8 +11,8 @@ Handles all post-review operations without LLM token usage:
 - Summary output
 
 Usage:
-  python3 post-review.py --pr-repo <repo> --bot-username <username> [--auto] < input.json
-  python3 post-review.py --pr-repo <repo> --bot-username <username> [--auto] --input <file>
+  python3 post-review.py --pr-repo <repo> --reviewer-username <username> [--auto] < input.json
+  python3 post-review.py --pr-repo <repo> --reviewer-username <username> [--auto] --input <file>
 """
 
 import argparse
@@ -464,7 +464,7 @@ def _repeats(violation, comment):
     return len(ours & theirs) / len(ours) >= 0.6
 
 
-def deduplicate_violations(violations, existing_comments, bot_username=None):
+def deduplicate_violations(violations, existing_comments, reviewer_username=None):
     """Remove violations the PR already has a comment for.
 
     A finding is dropped when the bot already commented on that line, or when a
@@ -491,7 +491,9 @@ def deduplicate_violations(violations, existing_comments, bot_username=None):
         key = (file_path, v.get("line"))
         user = comment_authors.get(key)
         skip = (
-            user is not None and bot_username is not None and user == bot_username
+            user is not None
+            and reviewer_username is not None
+            and user == reviewer_username
         ) or any(
             c.get("path") == file_path and _repeats(v, c) for c in existing_comments
         )
@@ -649,12 +651,12 @@ def still_open_as_violations(still_open):
     return violations
 
 
-def review_event(blocking, pr_author, bot_username):
+def review_event(blocking, pr_author, reviewer_username):
     """The review event for a verdict profile: CHANGES_REQUESTED when something
     must be fixed, COMMENT for nits. GitHub refuses a request for changes on
     the reviewer's own PR, and a profile with neither a verdict nor
     requestChanges keeps its comments informational."""
-    if (VERDICT or REQUEST_CHANGES) and blocking and pr_author != bot_username:
+    if (VERDICT or REQUEST_CHANGES) and blocking and pr_author != reviewer_username:
         return "REQUEST_CHANGES"
     return "COMMENT"
 
@@ -726,9 +728,11 @@ def submit_approval(repo, pr_number):
     return None
 
 
-def check_can_approve(pr_number, bot_username, reapprove=False, unresolved_ok=False):
+def check_can_approve(
+    pr_number, reviewer_username, reapprove=False, unresolved_ok=False
+):
     """Run the approval gate script. Returns True if approval is allowed."""
-    cmd = ["python3", CHECK_CAN_APPROVE, str(pr_number), bot_username]
+    cmd = ["python3", CHECK_CAN_APPROVE, str(pr_number), reviewer_username]
     if reapprove:
         cmd.append("--reapprove")
     if unresolved_ok:
@@ -749,7 +753,7 @@ def pr_link(repo, number, title=None):
     return link
 
 
-def process_pr(pr_data, repo, bot_username, auto_mode):
+def process_pr(pr_data, repo, reviewer_username, auto_mode):
     """Process a single PR. Returns result dict."""
     number = pr_data["number"]
     title = pr_data.get("title", "")
@@ -789,7 +793,9 @@ def process_pr(pr_data, repo, bot_username, auto_mode):
 
         # 7. Deduplicate against existing comments
         existing_comments = fetch_existing_comments(repo, number)
-        violations = deduplicate_violations(violations, existing_comments, bot_username)
+        violations = deduplicate_violations(
+            violations, existing_comments, reviewer_username
+        )
         for v in violations:
             embed_proof_in_comment(v)
 
@@ -833,11 +839,11 @@ def process_pr(pr_data, repo, bot_username, auto_mode):
             # (triage access), which would withhold every approval.
             can_approve = check_can_approve(
                 number,
-                bot_username,
+                reviewer_username,
                 reapprove=bool(pr_data.get("reviewRequested")),
                 unresolved_ok=True,
             )
-            if can_approve and pr_data.get("author") == bot_username:
+            if can_approve and pr_data.get("author") == reviewer_username:
                 # GitHub refuses an approval from the PR's own author, and an
                 # overall comment is not an acceptable substitute.
                 result["status"] = "approved"
@@ -871,7 +877,7 @@ def process_pr(pr_data, repo, bot_username, auto_mode):
                 number,
                 violations,
                 head_sha,
-                review_event(blocking, pr_data.get("author"), bot_username),
+                review_event(blocking, pr_data.get("author"), reviewer_username),
             )
             result["status"] = "posted"
             result["comments_posted"] = posted
@@ -910,7 +916,9 @@ def main():
         description="Phase 3 post-processing for review-prs"
     )
     parser.add_argument("--pr-repo", required=True, help="owner/repo for PRs")
-    parser.add_argument("--bot-username", required=True, help="Bot GitHub username")
+    parser.add_argument(
+        "--reviewer-username", required=True, help="Reviewer GitHub username"
+    )
     parser.add_argument("--auto", action="store_true", help="Auto-post mode")
     parser.add_argument(
         "--input", dest="input_file", help="Input JSON file (default: stdin)"
@@ -941,7 +949,7 @@ def main():
 
     results = []
     for pr_data in pr_results_input:
-        result = process_pr(pr_data, args.pr_repo, args.bot_username, args.auto)
+        result = process_pr(pr_data, args.pr_repo, args.reviewer_username, args.auto)
         results.append(result)
 
     # Build summary

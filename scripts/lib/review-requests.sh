@@ -1,13 +1,13 @@
 #!/bin/bash
 # The review-request queue: open PRs where a human clicked "Request review" (or
-# the re-request arrow) and named the account that reviews (the reviewer, else the bot).
+# the re-request arrow) and named the reviewer account.
 #
 # Sourced by scripts/check-review-requests.sh (the cron gate) and
 # scripts/review-requested.sh (the job it gates). One definition, because a gate
 # that asks a different question than its job either wakes the job for nothing
 # or starves it.
 #
-# Requires: lib/load-config.sh already sourced (BOT_PR_REPO, BOT_REVIEW_USERNAME).
+# Requires: lib/load-config.sh already sourced (BOT_PR_REPO, REVIEWER_USERNAME).
 
 # Print one PR number per line, newest first, at most `limit` of them. Returns
 # the query's exit code, so a caller can tell an empty queue (0, no output) from a
@@ -31,7 +31,7 @@ bot_review_requested_prs() {
   # cannot read fails the query, which callers treat as "do nothing".
   gh pr list \
     --repo "$BOT_PR_REPO" \
-    --search "review-requested:$BOT_REVIEW_USERNAME" \
+    --search "review-requested:$REVIEWER_USERNAME" \
     --state open \
     --limit "${BOT_REVIEW_QUEUE_WINDOW:-200}" \
     --json number,author \
@@ -48,14 +48,10 @@ bot_review_requested_prs() {
 # members' filter lives in lib/pings.py, so neither the gate nor the job ever sees
 # a ping from someone outside the org. See lib/pings.py for the rest.
 
-# The arguments every lib/pings.py command takes, in BOT_PING_ARGS. Both of our
-# accounts count as "us": a comment from either answers a ping.
+# The arguments every lib/pings.py command takes, in BOT_PING_ARGS. The reviewer
+# is the only account of ours: a comment from it answers a ping.
 bot_ping_args() {
-  BOT_PING_ARGS=(--login "$BOT_REVIEW_USERNAME")
-  local own
-  for own in "$BOT_USERNAME" "${BOT_REVIEWER_USERNAME:-}"; do
-    [ -n "$own" ] && BOT_PING_ARGS+=(--self "$own")
-  done
+  BOT_PING_ARGS=(--login "$REVIEWER_USERNAME" --self "$REVIEWER_USERNAME")
   return 0
 }
 

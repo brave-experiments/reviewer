@@ -17,12 +17,12 @@ source "$SCRIPT_DIR/lib/review-requests.sh"
 if ! PRS=$(bot_review_requested_prs); then
   # A failed query is not an empty queue, but the safe direction is the same:
   # never start a paid session on an answer we do not have.
-  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Could not query review requests for $BOT_REVIEW_USERNAME — skipping." >&2
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Could not query review requests for $REVIEWER_USERNAME — skipping." >&2
   exit 1
 fi
 
 if [ -n "$PRS" ]; then
-  echo "Review requested from $BOT_REVIEW_USERNAME on: $(echo "$PRS" | tr '\n' ' ')"
+  echo "Review requested from $REVIEWER_USERNAME on: $(echo "$PRS" | tr '\n' ' ')"
   exit 0
 fi
 
@@ -30,14 +30,14 @@ fi
 # reach it, and it is polled on the same schedule: one more search per repo, and
 # only when there is no review to start the job for anyway.
 if ! PINGS=$(bot_ping_queue); then
-  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Could not query pings for $BOT_REVIEW_USERNAME — skipping." >&2
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Could not query pings for $REVIEWER_USERNAME — skipping." >&2
   exit 1
 fi
 
 if [ -z "$PINGS" ]; then
-  echo "No review requests or pings for $BOT_REVIEW_USERNAME in $BOT_PR_REPO — nothing to do."
+  echo "No review requests or pings for $REVIEWER_USERNAME in $BOT_PR_REPO — nothing to do."
   exit 1
 fi
 
-echo "Pinged $BOT_REVIEW_USERNAME on: $(echo "$PINGS" | awk -F'\t' '{printf "%s#%s ", $1, $2}')"
+echo "Pinged $REVIEWER_USERNAME on: $(echo "$PINGS" | awk -F'\t' '{printf "%s#%s ", $1, $2}')"
 exit 0

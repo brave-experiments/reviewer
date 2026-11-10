@@ -347,7 +347,7 @@ def prior_hashes_for(pr, prior_files):
     return prior_files.get(str(pr["number"]))
 
 
-def bot_last_review_approved(pr_number, bot_username):
+def bot_last_review_approved(pr_number, reviewer_username):
     """Whether the bot's own most recent review of the PR is an approval.
 
     Read from the host, not the cache. Only a review the bot submitted counts,
@@ -374,7 +374,7 @@ def bot_last_review_approved(pr_number, bot_username):
         mine = [
             r
             for r in reviews
-            if (r.get("user") or {}).get("login") == bot_username
+            if (r.get("user") or {}).get("login") == reviewer_username
             and r.get("state") != "PENDING"
         ]
         return bool(mine) and mine[-1].get("state") == "APPROVED"
@@ -423,9 +423,9 @@ def parse_args():
 
 
 # ---------------------------------------------------------------------------
-# Bot username
+# Reviewer username
 # ---------------------------------------------------------------------------
-def resolve_bot_username():
+def resolve_reviewer_username():
     result = subprocess.run(
         ["gh", "api", "user", "--jq", ".login"],
         capture_output=True,
@@ -433,7 +433,7 @@ def resolve_bot_username():
         timeout=15,
     )
     if result.returncode != 0:
-        log(f"ERROR: failed to resolve bot username: {result.stderr}")
+        log(f"ERROR: failed to resolve reviewer username: {result.stderr}")
         sys.exit(1)
     return result.stdout.strip()
 
@@ -991,13 +991,13 @@ def fetch_prior_comments(pr_number, org_members, include_author=None):
 # ---------------------------------------------------------------------------
 # Resolve bot threads (subprocess — it uses argparse)
 # ---------------------------------------------------------------------------
-def resolve_bot_threads(pr_number, bot_username):
+def resolve_bot_threads(pr_number, reviewer_username):
     result = subprocess.run(
         [
             sys.executable,
             os.path.join(_BOT_DIR, "scripts", "resolve-bot-threads.py"),
             str(pr_number),
-            bot_username,
+            reviewer_username,
         ],
         capture_output=True,
         text=True,
@@ -1039,7 +1039,7 @@ query($owner: String!, $name: String!, $number: Int!) {
 """
 
 
-def fetch_open_bot_threads(pr_number, bot_username):
+def fetch_open_bot_threads(pr_number, reviewer_username):
     """The bot's review threads still unresolved, as [{thread_id, path, line, url, body}].
 
     Run after resolve_bot_threads, so the threads a person replied to are gone.
@@ -1075,7 +1075,10 @@ def fetch_open_bot_threads(pr_number, bot_username):
         if node.get("isResolved"):
             continue
         first = (node.get("comments") or {}).get("nodes") or []
-        if not first or (first[0].get("author") or {}).get("login") != bot_username:
+        if (
+            not first
+            or (first[0].get("author") or {}).get("login") != reviewer_username
+        ):
             continue
         c = first[0]
         threads.append(
@@ -1093,13 +1096,13 @@ def fetch_open_bot_threads(pr_number, bot_username):
 # ---------------------------------------------------------------------------
 # Check-can-approve (subprocess — exits non-zero when can't approve)
 # ---------------------------------------------------------------------------
-def check_can_approve(pr_number, bot_username):
+def check_can_approve(pr_number, reviewer_username):
     result = subprocess.run(
         [
             sys.executable,
             os.path.join(_BOT_DIR, "scripts", "check-can-approve.py"),
             str(pr_number),
-            bot_username,
+            reviewer_username,
         ],
         capture_output=True,
         text=True,
@@ -1430,8 +1433,8 @@ def _prior_parts(ctx):
     return [
         "## Prior Review Comments",
         "",
-        f"The bot's GitHub username is `{ctx['bot_username']}`. Comments from "
-        "this user are the bot's own previous comments.",
+        f"The reviewer's GitHub username is `{ctx['reviewer_username']}`. Comments from "
+        "this user are the reviewer's own previous comments.",
         "",
         ctx["prior_comments"],
         "",
@@ -1891,13 +1894,13 @@ def _text_pages(text):
     return pages
 
 
-def bot_thread_state(pr_number, bot_username, pr_work_dir):
+def bot_thread_state(pr_number, reviewer_username, pr_work_dir):
     """Resolve the bot's threads a person answered, then list the ones still open.
 
     Returns (thread_resolution, open_threads_file, open_threads_failed).
     """
     try:
-        thread_resolution = resolve_bot_threads(pr_number, bot_username)
+        thread_resolution = resolve_bot_threads(pr_number, reviewer_username)
     except Exception as e:
         thread_resolution = {
             "resolved": 0,
@@ -1909,7 +1912,7 @@ def bot_thread_state(pr_number, bot_username, pr_work_dir):
     open_threads_file = None
     open_threads_failed = False
     try:
-        open_threads = fetch_open_bot_threads(pr_number, bot_username)
+        open_threads = fetch_open_bot_threads(pr_number, reviewer_username)
         if open_threads:
             open_threads_file = os.path.join(pr_work_dir, "open_threads.json")
             with open(open_threads_file, "w") as f:
@@ -1921,7 +1924,7 @@ def bot_thread_state(pr_number, bot_username, pr_work_dir):
 
 
 def _answer_unchanged_request(
-    pr, bot_username, approved_hashes, hashes, pr_number, pr_work_dir
+    pr, reviewer_username, approved_hashes, hashes, pr_number, pr_work_dir
 ):
     """The bot's thread state when this request may be answered without a model.
 
@@ -1931,10 +1934,10 @@ def _answer_unchanged_request(
     """
     if not patch_unchanged(approved_hashes, hashes):
         return None
-    if not bot_last_review_approved(pr_number, bot_username):
+    if not bot_last_review_approved(pr_number, reviewer_username):
         log(f"  PR #{pr_number}: the bot's latest review is not an approval")
         return None
-    state = bot_thread_state(pr_number, bot_username, pr_work_dir)
+    state = bot_thread_state(pr_number, reviewer_username, pr_work_dir)
     _, open_threads_file, open_threads_failed = state
     if open_threads_file or open_threads_failed:
         return None
@@ -1943,7 +1946,7 @@ def _answer_unchanged_request(
 
 def process_pr(
     pr,
-    bot_username,
+    reviewer_username,
     org_members,
     work_dir,
     auto_mode=False,
@@ -1992,7 +1995,7 @@ def process_pr(
         # review on the host is that approval, and it has no comment still open.
         # Anything else, including a lookup that failed, is read as before.
         answered = _answer_unchanged_request(
-            pr, bot_username, approved_hashes, hashes, pr_number, pr_work_dir
+            pr, reviewer_username, approved_hashes, hashes, pr_number, pr_work_dir
         )
         if answered is None:
             prior_hashes = None
@@ -2069,7 +2072,7 @@ def process_pr(
         log(f"  WARNING: image extraction failed for #{pr_number}: {e}")
 
     thread_resolution, open_threads_file, open_threads_failed = bot_thread_state(
-        pr_number, bot_username, pr_work_dir
+        pr_number, reviewer_username, pr_work_dir
     )
 
     try:
@@ -2119,7 +2122,7 @@ def process_pr(
         "has_approval": has_approval,
         "rereview_note": rereview_note,
         "prior_comments": prior_comments,
-        "bot_username": bot_username,
+        "reviewer_username": reviewer_username,
         "guidance": REVIEW_GUIDANCE,
     }
 
@@ -2395,7 +2398,7 @@ def record_review(pr_number, head_sha, hashes_file):
 # ---------------------------------------------------------------------------
 # Process a single cached PR
 # ---------------------------------------------------------------------------
-def process_cached_pr(pr, bot_username):
+def process_cached_pr(pr, reviewer_username):
     """Process a cached PR: resolve threads, check approval gate."""
     pr_number = pr["number"]
     pr_title = pr["title"]
@@ -2405,7 +2408,7 @@ def process_cached_pr(pr, bot_username):
 
     # Resolve threads
     try:
-        thread_resolution = resolve_bot_threads(pr_number, bot_username)
+        thread_resolution = resolve_bot_threads(pr_number, reviewer_username)
     except Exception as e:
         thread_resolution = {
             "resolved": 0,
@@ -2416,7 +2419,7 @@ def process_cached_pr(pr, bot_username):
 
     # Check approval gate
     try:
-        can_approve = check_can_approve(pr_number, bot_username)
+        can_approve = check_can_approve(pr_number, reviewer_username)
     except Exception as e:
         can_approve = {"result": False, "reason": str(e)}
 
@@ -2446,11 +2449,11 @@ def process_cached_pr(pr, bot_username):
 def main():
     auto_mode, reviewer_priority, full, max_prs, fetch_args = parse_args()
 
-    # 1. Resolve bot username
-    log("Resolving bot username...")
-    bot_username = resolve_bot_username()
-    log(f"Bot username: {bot_username}")
-    ensure_reviewer(_config, log, bot_username)
+    # 1. Resolve reviewer username
+    log("Resolving reviewer username...")
+    reviewer_username = resolve_reviewer_username()
+    log(f"Reviewer username: {reviewer_username}")
+    ensure_reviewer(_config, log, reviewer_username)
 
     # 2. Config already loaded at module level
 
@@ -2460,7 +2463,7 @@ def main():
     # Build argv for fetch-prs module's parse_args
     fetch_argv = list(fetch_args)
     if reviewer_priority:
-        fetch_argv.extend(["--reviewer-priority", bot_username])
+        fetch_argv.extend(["--reviewer-priority", reviewer_username])
     if max_prs is not None:
         fetch_argv.extend(["--max-prs", str(max_prs)])
 
@@ -2517,16 +2520,20 @@ def main():
             days,
             cache,
             org_members,
-            reviewer_priority=bot_username if reviewer_priority else None,
+            reviewer_priority=reviewer_username if reviewer_priority else None,
         )
 
         # Sort by reviewer priority
         if reviewer_priority:
             to_review.sort(
-                key=lambda p: 0 if _fp_mod.is_requested_reviewer(p, bot_username) else 1
+                key=lambda p: (
+                    0 if _fp_mod.is_requested_reviewer(p, reviewer_username) else 1
+                )
             )
             cached_prs_raw.sort(
-                key=lambda p: 0 if _fp_mod.is_requested_reviewer(p, bot_username) else 1
+                key=lambda p: (
+                    0 if _fp_mod.is_requested_reviewer(p, reviewer_username) else 1
+                )
             )
 
         # Apply max-prs limit
@@ -2557,7 +2564,7 @@ def main():
             "author": author,
             "hasApproval": _fp_mod.has_any_approval(pr),
             "isExternalContributor": bool(org_members and author not in org_members),
-            "reviewRequested": _fp_mod.is_requested_reviewer(pr, bot_username),
+            "reviewRequested": _fp_mod.is_requested_reviewer(pr, reviewer_username),
         }
         return entry
 
@@ -2605,7 +2612,7 @@ def main():
                 executor.submit(
                     process_pr,
                     pr,
-                    bot_username,
+                    reviewer_username,
                     org_members,
                     work_dir,
                     auto_mode,
@@ -2649,7 +2656,7 @@ def main():
         log(f"\nProcessing {len(cached_to_process)} cached PRs...")
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = {
-                executor.submit(process_cached_pr, pr, bot_username): pr
+                executor.submit(process_cached_pr, pr, reviewer_username): pr
                 for pr in cached_to_process
             }
             for future in as_completed(futures):
@@ -2674,7 +2681,7 @@ def main():
 
     # 6. Write manifest.json (lightweight — no diffs, no prompts, just file paths)
     output = {
-        "bot_username": bot_username,
+        "reviewer_username": reviewer_username,
         "pr_repo": PR_REPO,
         "target_repo_path": TARGET_REPO_PATH,
         "auto_mode": auto_mode,

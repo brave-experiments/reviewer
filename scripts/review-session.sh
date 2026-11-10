@@ -71,14 +71,13 @@ if [ "$(jq -r '.needs_model' "$WORK_DIR/manifest.json")" = "false" ]; then
 fi
 
 # An empty gh config directory as well as no token: gh falls back to its default
-# config directory, which holds the bot's login.
+# config directory, which holds the machine owner's login.
 NO_GH=$(mktemp -d)
-BOT_REVIEW_AGENT_TMP=""
-trap 'rm -rf "$NO_GH" "$BOT_REVIEW_AGENT_TMP"' EXIT
+REVIEWER_AGENT_TMP=""
+trap 'rm -rf "$NO_GH" "$REVIEWER_AGENT_TMP"' EXIT
 
 SETTINGS=$(python3 "$SCRIPT_DIR/review-session-settings.py" --work-dir "$WORK_DIR" \
-  ${BOT_GH_CONFIG_DIR:+--deny-read "$BOT_GH_CONFIG_DIR"} \
-  ${BOT_REVIEWER_GH_CONFIG_DIR:+--deny-read "$BOT_REVIEWER_GH_CONFIG_DIR"} \
+  ${REVIEWER_GH_CONFIG_DIR:+--deny-read "$REVIEWER_GH_CONFIG_DIR"} \
   ${GH_CONFIG_DIR:+--deny-read "$GH_CONFIG_DIR"}) || exit 1
 
 # The agent is reviewer.agent's (claude unless config.json says otherwise).
@@ -89,7 +88,7 @@ RC=0
   cd "$BOT_DIR" || exit 1
   exec env -u GH_TOKEN -u GITHUB_TOKEN -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN \
     GH_CONFIG_DIR="$NO_GH" \
-    "${BOT_REVIEW_AGENT_CMD[@]}" </dev/null
+    "${REVIEWER_AGENT_CMD[@]}" </dev/null
 ) || RC=$?
 [ "$RC" -eq 0 ] || echo "The review session exited $RC; collecting what it wrote." >&2
 

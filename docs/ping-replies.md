@@ -8,13 +8,13 @@ five-minute schedule. There is no cron entry of its own.
 ## What counts as a ping
 
 A comment, line comment, review body or opening post that @-mentions the
-reviewer account (the bot, when no reviewer is configured) and is written by
+reviewer account and is written by
 someone in `.ignore/org-members.txt`, in the PR repository or the issue
 repository. Only direct mentions count. A team mention does not.
 
 A thread is **waiting** while the newest such mention has no later comment from
-either of our accounts. The queue is GitHub's own, like the review queue: a reply
-(or anyone else answering as the bot) takes the thread out, and a new ping puts it
+the reviewer. The queue is GitHub's own, like the review queue: a reply
+(or anyone else answering as the reviewer) takes the thread out, and a new ping puts it
 back. Nothing local records what was answered, so every machine agrees.
 
 Also left out: closed threads, pings older than 72 hours (a deployment that starts
@@ -60,7 +60,7 @@ To retry a ping that was given up on, delete its
 
 ## Not covered
 
-- A mention of the bot account when a separate reviewer account is configured.
+- A mention of any account other than the reviewer.
   The queue asks for the same account the review queue does.
 - A reply that changes code. A reply is one comment of text; nothing is checked
   out and nothing is pushed.

@@ -47,10 +47,10 @@ $PRINT_ONLY || mkdir -p "$LOG_DIR"
 
 # Cron's PATH is not this shell's, so the agent binary's directory is resolved
 # here and put on the block's PATH.
-CLAUDE_BIN_DIR=$(dirname "$BOT_CLAUDE_BIN")
+CLAUDE_BIN_DIR=$(dirname "$REVIEWER_CLAUDE_BIN")
 
 # Which agent the review jobs drive, read from config.json when the schedules
-# are installed (not from BOT_REVIEW_AGENT in this shell: an environment
+# are installed (not from REVIEWER_AGENT in this shell: an environment
 # override on the machine running `make schedules` is not the deployment's
 # setting). Read again when each job fires, so it needs only the PATH here.
 REVIEW_AGENT=$(bot_config '.reviewer.agent')
@@ -61,13 +61,13 @@ REVIEW_AGENT="${REVIEW_AGENT:-claude}"
 resolve_agent_bin() {
   local bin
   case "$1" in
-    claude) bin="$BOT_CLAUDE_BIN" ;;
-    bravebot) bin="$BOT_BRAVEBOT_BIN" ;;
+    claude) bin="$REVIEWER_CLAUDE_BIN" ;;
+    bravebot) bin="$REVIEWER_BRAVEBOT_BIN" ;;
     *) echo "Error: unsupported agent '$1' (expected: claude | bravebot)" >&2; return 1 ;;
   esac
   if [[ "$bin" != /* ]]; then
     bin=$(command -v "$bin") || {
-      echo "Error: the $1 binary is not on PATH; set it in config.json (bot.${1}Bin) or run 'make setup'." >&2
+      echo "Error: the $1 binary is not on PATH; set it in config.json (reviewer.${1}Bin) or run 'make setup'." >&2
       return 1
     }
   fi
