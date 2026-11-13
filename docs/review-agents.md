@@ -109,8 +109,9 @@ What replaces the allowlist:
 4. **`--trust-workspace`** trusts the whole bot directory so the `/review-prs` skill under
    `.claude/skills` loads (a symlink into the checked-in `agents/skills`, made by
    `make setup`). It trusts the PR checkout nothing, but it does vouch for the
-   bot directory's own files. It is also one of the conditions for the widened writes of
-   weakness 3.
+   bot directory's own files. Bypass trusts the working directory whether or not the flag
+   is given (`docs/specs/permission-modes.md`, MODE-4), so dropping the flag would not
+   undo the widened writes of weakness 3.
 5. **Programs `run` starts can reach the network.** The session holds no GitHub token,
    and credential paths are denied to programs, but a program it runs can send out
    anything else it can read: the PR checkout, the bot directory's files, and, by
@@ -125,7 +126,7 @@ stop it writing a bad results file inside the work directory.
 
 ### What would close the gap
 
-All of these are changes to bravebot:
+Two changes to bravebot:
 
 1. **A one-shot mode that refuses what the rules do not allow and lets the run carry on**,
    as claude's `dontAsk` does. Today a refusal ends a one-shot run, and `allow` rules are
@@ -135,11 +136,18 @@ All of these are changes to bravebot:
    one script. But a decline still ends the run (CLI-36), so one stray command costs the
    whole review. `--accept-edits` refuses every run, and `--auto` leaves runs to a
    classifier; under either, a refusal still ends the run.
-2. **A way to read a named directory as trusted without vouching for everything.**
-   Outside bypass, content nobody vouched for is never put in a message to the model
-   (`docs/specs/labels.md`), and an unattended run cannot vouch for a directory given with
-   `--add-dir`. So the model could not see the PR it reviews.
-3. **`--run-network closed` that can still start `python3` on Linux.** With 1, this
+2. **`--run-network closed` that can still start `python3` on Linux.** With 1, this
    matters less: the only program would be `select-candidates.py`.
 
-With 1 and 2 the session would not need bypass, and the widened reach goes with it.
+And one change here, once bypass is gone. Outside bypass, content nobody vouched for is
+never put in a message to the model (bravebot's `docs/specs/labels.md`), and a directory
+given with `--add-dir` is vouched for by nothing (CLI-11, TRUST-26). The session starts in
+the bot directory and reaches the work directory through `--add-dir`, so without bypass
+the model could not see the PR it reviews. Everything the review reads is inside the work
+directory (`prepare-review.py` puts each PR's worktree at `<work>/<pr>/source`), so the
+session should start there with `--trust-workspace`, and reach the bot directory through
+`--add-dir`. The skills, the subagents and `select-candidates.py` then have to be found
+from the work directory. Under bypass the move changes nothing, since bypass trusts the
+workspace and vouches for every read (MODE-4).
+
+With 1 and that move the session would not need bypass, and the widened reach goes with it.
