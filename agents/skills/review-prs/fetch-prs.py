@@ -311,17 +311,14 @@ def filter_prs(prs, mode, days, cache, org_members, reviewer_priority=None):
                     skipped_filtered += 1
                     continue
 
-        # Bot previously approved this PR — don't come back UNLESS the bot
-        # has been explicitly re-requested as a reviewer AND new commits have
-        # landed since the prior review. In that case the prior approval is
-        # stale and must be cleared so the bot can re-approve if appropriate.
+        # Bot previously approved this PR. The approval holds only for the
+        # commit it was given on: once the head moves, it is stale and is
+        # cleared so the PR is reviewed again (and re-approved if appropriate),
+        # whether or not the bot was re-requested. An unchanged head stays
+        # skipped. An approval with no recorded head cannot be compared, so it
+        # is left alone.
         if pr_num in approved:
-            is_rerequest_on_new_sha = (
-                reviewer_priority
-                and is_requested_reviewer(pr, reviewer_priority)
-                and cache.get(pr_num) != head_sha
-            )
-            if is_rerequest_on_new_sha:
+            if cache.get(pr_num) is not None and cache.get(pr_num) != head_sha:
                 approved.discard(pr_num)
                 cache["_approved"] = sorted(approved)
                 approved_removals.add(pr_num)

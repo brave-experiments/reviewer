@@ -1807,6 +1807,35 @@ class TestSweepCutoff:
         assert [p["number"] for p in to_review] == [1630]
 
 
+    def _approved_pr(self, head):
+        return {
+            "number": 41074,
+            "title": "Upgrade from Chromium 158 to Chromium 159",
+            "headRefOid": head,
+            "baseRefName": "master",
+            "author": {"login": "member"},
+            "updatedAt": self._ago(hours=2).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+    def test_an_approved_pr_with_new_commits_is_reviewed_again(self, fetch):
+        """The approval was for the old head. The sweep must not need a
+        re-request to come back to it."""
+        cache = {"_approved": ["41074"], "41074": "old"}
+        got = fetch.filter_prs(
+            [self._approved_pr("new")], "days", 1, cache, {"member"}
+        )
+        assert [p["number"] for p in got[0]] == [41074]
+        assert "41074" not in cache["_approved"]
+
+    def test_an_approved_pr_with_the_same_head_is_left_alone(self, fetch):
+        cache = {"_approved": ["41074"], "41074": "same"}
+        got = fetch.filter_prs(
+            [self._approved_pr("same")], "days", 1, cache, {"member"}
+        )
+        assert got[0] == []
+        assert "41074" in cache["_approved"]
+
+
 class TestEarlierComments:
     """The bot's own unresolved comments. A re-review that finds nothing new
     must still say whether they are fixed: resolve the ones the code answers and
