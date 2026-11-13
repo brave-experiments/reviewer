@@ -12,16 +12,12 @@
 # write; the rest are readable only. The caller still runs the command with no
 # GitHub token and an empty gh config directory.
 #
-# claude is held by an allowlist (review-session-settings.py's rules under
-# --permission-mode dontAsk): anything the rules do not allow is refused.
-#
-# bravebot cannot be held that way. A one-shot run has nobody to ask, so a write or
-# a command it is not allowed to make ends the run on status 4, and an `allow` rule
-# decides nothing there; the run would never reach its results file. The only mode
-# in which the work gets done is --dangerously-skip-permissions, which answers every
-# question yes and also vouches for every file, so what the session reads is no
-# longer quarantined. What is left holding it, and what is not, is in
-# docs/review-agents.md.
+# Both agents are held by the same allowlist, review-session-settings.py's rules:
+# anything the rules do not allow is refused and the session carries on. claude
+# reads them under --permission-mode dontAsk. A one-shot bravebot run applies them
+# as a session does, and --trust-workspace lets the model read the --add-dir
+# directories; both need a bravebot release that has them (docs/review-agents.md).
+# bravebot also runs its programs in its sandbox, held to the work directory.
 
 # The session's tools, by bravebot's names: nothing that fetches.
 REVIEWER_BRAVEBOT_REVIEW_TOOLS="read_file,list_files,search,repo_map,read_git,write_file,edit_file,run,spawn_agent,spawn_processor,load_skill,search_skills"
@@ -68,12 +64,12 @@ bot_review_agent_cmd() {
       # The prompt goes first: bravebot reads --model only after it.
       # --trust-workspace is what lets /review-prs, a skill under the bot
       # directory's .claude/skills (a symlink into agents/, made by `make setup`),
-      # load at all.
+      # load at all, and what lets the model read the --add-dir directories.
       settings_file=$(mktemp "${TMPDIR:-/tmp}/review-settings.XXXXXX") || return 1
-      # Bypass mode ignores the Edit allow rule that confines claude's writes to the
-      # work directory, and deny rules still hold. So the confinement is written the
-      # other way round: deny writes to the bot directory and to every directory
-      # that is only there to be read.
+      # The Edit allow rule holds writes to the work directory. A one-shot run also
+      # applies the operator's own allow rules, so writes to the bot directory and to
+      # every directory that is only there to be read are denied as well: a deny rule
+      # wins over any allow rule.
       printf '%s\n' "$settings" | jq --arg bot "$BOT_DIR" --args '
         .permissions.deny += ([$bot] + $ARGS.positional | map("Edit(//" + (. | ltrimstr("/")) + "/**)"))
       ' "${@:2}" > "$settings_file" || { rm -f "$settings_file"; return 1; }
@@ -84,16 +80,20 @@ bot_review_agent_cmd() {
       # reviewer.bravebotModel when set, else bravebot's own `model` setting.
       model_flag=()
       [ -n "${REVIEWER_BRAVEBOT_MODEL:-}" ] && model_flag=(--model "$REVIEWER_BRAVEBOT_MODEL")
-      # --run-network closed is not used: bravebot cannot confine python3 under it on
-      # Linux ("could not be confined: the network is closed"), so the one script the
-      # session must run, select-candidates.py, never starts and no review is posted.
-      # docs/review-agents.md says what that leaves.
+      # --run-network closed is not used: bravebot closes the network with a network
+      # namespace, and on a Linux kernel that refuses an unprivileged one it refuses
+      # to start the program at all, so select-candidates.py would never run and no
+      # review would be posted. The allow rules let no other program run.
       REVIEWER_AGENT_CMD=("$REVIEWER_BRAVEBOT_BIN" "$prompt" ${model_flag[@]+"${model_flag[@]}"}
-        --settings "$settings_file" --trust-workspace --dangerously-skip-permissions
+        --settings "$settings_file" --trust-workspace
         --tools "$tools" --run-network open
         --sandbox workspace-write --sandbox-deny-write "$BOT_DIR")
       for dir in "$@"; do
         REVIEWER_AGENT_CMD+=(--add-dir "$dir")
+      done
+      # A program may write the work directory and nothing that is only there to be read.
+      for dir in "${@:2}"; do
+        REVIEWER_AGENT_CMD+=(--sandbox-deny-write "$dir")
       done
       [ -n "$work_dir" ] && REVIEWER_AGENT_CMD+=(--sandbox-allow-write "$work_dir")
       # What a program the session starts must not read. The settings file's Read

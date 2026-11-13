@@ -23,9 +23,9 @@ The `review-prs` skill (`agents/skills/review-prs/`) is a file-based pipeline th
 | Value | Status |
 | --- | --- |
 | `claude` (default) | Confined by an allowlist (`--permission-mode dontAsk`). |
-| `bravebot` | Runs, but is confined differently and less tightly. |
+| `bravebot` | Confined by the same allowlist, and its programs by its sandbox (needs a bravebot release with brave/bravebot#4131 and #4124). |
 
-Other agents (codex, cursor) have no confined headless mode wired in. [docs/review-agents.md](docs/review-agents.md) says how each is confined and what is weaker with bravebot.
+Other agents (codex, cursor) have no confined headless mode wired in. [docs/review-agents.md](docs/review-agents.md) says how each is confined and where bravebot differs from claude.
 
 Linking is separate from which agent runs the schedule. `agents/setup.py` (run by `make setup` and `make link-agents`) links the checked-in `agents/` into every tool's discovery paths: Claude Code `.claude/`, Codex `.agents/skills` + `.codex/agents` (generated TOML), Cursor `.cursor/`, bravebot `.bravebot/`. The links are gitignored. `reviewer.agent` still accepts only `claude` and `bravebot` for the scheduled sessions (`scripts/lib/review-agent.sh` refuses anything else). The sessions run the skill's scripts through the `.claude/skills/review-prs/` link, so it must exist on the machine that runs them.
 

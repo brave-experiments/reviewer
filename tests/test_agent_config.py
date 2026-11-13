@@ -116,13 +116,19 @@ def test_the_environment_does_not_choose_the_agent_the_crontab_is_built_for(tmp_
     assert result.returncode == 0, result.stderr
 
 
-def review_cmd(tmp_dir, agent, kind="review", extra_env=None):
+def review_cmd(
+    tmp_dir,
+    agent,
+    kind="review",
+    extra_env=None,
+    settings='{"permissions":{"deny":[]}}',
+):
     """REVIEWER_AGENT_CMD, one word to a line, as review-agent.sh builds it."""
     root = Schedules._bot_dir(tmp_dir, "default")
     script = (
         f'source "{root}/scripts/lib/load-config.sh"\n'
         f'source "{root}/scripts/lib/review-agent.sh"\n'
-        f'bot_review_agent_cmd {kind} "/review-prs --work-dir W" sonnet \'{{"permissions":{{"deny":[]}}}}\' '
+        f"bot_review_agent_cmd {kind} \"/review-prs --work-dir W\" sonnet '{settings}' "
         f'"{tmp_dir}/work" "{tmp_dir}/target"\n'
         'printf "%s\\n" "${REVIEWER_AGENT_CMD[@]}"\n'
         'echo "TMP=$REVIEWER_AGENT_TMP"\n'
@@ -162,9 +168,29 @@ def test_bravebot_reviews_without_a_fetch_tool(tmp_dir):
     # `closed` stops bravebot starting python3 at all, so select-candidates.py
     # cannot run and no review is ever posted.
     assert out[out.index("--run-network") + 1] == "open"
-    # Writes are held to the work directory; the bot directory is refused.
+    # Programs write the work directory; the bot directory and the read-only
+    # directories are refused.
     assert out[out.index("--sandbox-allow-write") + 1].endswith("/work")
-    assert "--sandbox-deny-write" in out
+    denied = [
+        out[i + 1] for i, word in enumerate(out) if word == "--sandbox-deny-write"
+    ]
+    assert any(path.endswith("/bot") for path in denied), denied
+    assert any(path.endswith("/target") for path in denied), denied
+    assert not any(path.endswith("/work") for path in denied), denied
+
+
+def test_bravebot_reviews_under_the_rules_and_not_by_bypassing_them(tmp_dir):
+    """Bypass approves every write and run and lets programs write anywhere the
+    account can; the session is held by the allow and deny rules instead."""
+    out = review_cmd(tmp_dir, "bravebot").stdout.splitlines()
+    assert "--dangerously-skip-permissions" not in out
+    assert "--dangerously-bypass-approvals-and-sandbox" not in out
+    assert "--accept-edits" not in out and "--auto" not in out
+    assert out[out.index("--sandbox") + 1] == "workspace-write"
+    # The model reads the work directory only where the run trusts it.
+    assert "--trust-workspace" in out
+    added = [out[i + 1] for i, word in enumerate(out) if word == "--add-dir"]
+    assert [os.path.basename(path) for path in added] == ["work", "target"]
 
 
 def test_bravebot_reviews_never_get_the_claude_model_alias(tmp_dir):
@@ -185,7 +211,9 @@ def test_a_bravebot_reply_session_gets_no_program_and_no_delegate(tmp_dir):
 
 
 def test_bravebot_settings_deny_writes_outside_the_work_directory(tmp_dir):
-    """Bypass mode ignores the Edit allow rule, so the confinement is a deny."""
+    """The operator's own allow rules apply to a one-shot run too, so the bot
+    directory and the read-only directories are denied, which no allow rule
+    overrides."""
     out = review_cmd(tmp_dir, "bravebot").stdout.splitlines()
     settings = out[out.index("--settings") + 1]
     with open(settings) as f:
@@ -193,6 +221,25 @@ def test_bravebot_settings_deny_writes_outside_the_work_directory(tmp_dir):
     assert any(rule.startswith("Edit(//") and "/bot/" in rule for rule in deny)
     assert any(rule.endswith("/target/**)") for rule in deny)
     assert not any(rule.endswith("/work/**)") for rule in deny)
+
+
+def test_bravebot_gets_the_allow_rules_claude_gets(tmp_dir):
+    """The allowlist is what holds a bravebot session, so the rules
+    review-session-settings.py wrote reach it unchanged beside the added denies."""
+    given = {
+        "permissions": {
+            "allow": ["Edit(//w/**)", "Bash(python3 select-candidates.py *)"],
+            "deny": ["WebFetch", "Read(//h/.ssh/**)"],
+        }
+    }
+    out = review_cmd(
+        tmp_dir, "bravebot", settings=json.dumps(given, separators=(",", ":"))
+    ).stdout.splitlines()
+    with open(out[out.index("--settings") + 1]) as f:
+        written = json.load(f)["permissions"]
+    assert written["allow"] == given["permissions"]["allow"]
+    assert written["deny"][:2] == given["permissions"]["deny"]
+    assert len(written["deny"]) == 4
 
 
 def test_an_agent_that_cannot_review_is_refused(tmp_dir):
