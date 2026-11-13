@@ -1806,7 +1806,6 @@ class TestSweepCutoff:
         to_review, *_ = fetch.filter_prs([pr], "days", 1, cache, {"member"})
         assert [p["number"] for p in to_review] == [1630]
 
-
     def _approved_pr(self, head):
         return {
             "number": 41074,
@@ -1821,9 +1820,7 @@ class TestSweepCutoff:
         """The approval was for the old head. The sweep must not need a
         re-request to come back to it."""
         cache = {"_approved": ["41074"], "41074": "old"}
-        got = fetch.filter_prs(
-            [self._approved_pr("new")], "days", 1, cache, {"member"}
-        )
+        got = fetch.filter_prs([self._approved_pr("new")], "days", 1, cache, {"member"})
         assert [p["number"] for p in got[0]] == [41074]
         assert "41074" not in cache["_approved"]
 
