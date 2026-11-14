@@ -985,6 +985,18 @@ class TestProfileReview:
             assert bool(prep.review_guidance(profile)) is asked, name
             assert post.review_verdict(profile) is asked, name
 
+    def test_bravebot_reviews_security_by_its_own_audit_skill(self, prep, collect):
+        profile = prep.load_profile({"project": {"profile": "bravebot"}}, ROOT_DIR)
+        skill = "agents/skills/security-audit"
+        guidance = [g for g in prep.review_guidance(profile) if skill in g]
+        assert len(guidance) == 1
+        for part in ("SKILL.md", "/security-audit changed", "verify.md", "lanes/"):
+            assert part in guidance[0], part
+        assert any(skill in c for c in collect.review_checks(profile))
+        stated = " ".join(prep.review_guidance(profile))
+        assert "untrusted-content rule" not in stated
+        assert "reviewing-for-the-rule.md" not in stated
+
 
 class TestVerdict:
     PR = {"number": 7, "title": "t", "headRefOid": "abcdef1234567890"}
