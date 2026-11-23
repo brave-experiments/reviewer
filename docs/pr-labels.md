@@ -47,7 +47,9 @@ A project's labels, what decides each, and the `gh label create` commands for th
 "Pull request labels" section of `projects/<name>/docs/labels.md`. The profile is the source of
 the labels, and a test checks that the project's doc names every label and has a command for it.
 The shipped profiles start every label with `pr/`, so none of them is a label the repository
-already had, and a test holds them to it.
+already had, and a test holds them to it. The exception is bravebot's three path labels
+`tests-only`, `skills-only` and `docs-only`, which are the labels its issues carry, so one query
+lists issues and pull requests. A test names them.
 
 ## Reading what it did
 

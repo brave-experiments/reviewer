@@ -14,6 +14,13 @@ from lib.load_config import review_label_prs
 
 CACHE_KEY = "_labelled"
 
+# The labels of bravebot's issues that its pull requests carry as well, so one query lists both.
+SHARED_WITH_ISSUES = {
+    ("bravebot", "tests-only"),
+    ("bravebot", "skills-only"),
+    ("bravebot", "docs-only"),
+}
+
 
 def cfg(rules=(), judged=None):
     return review_label_prs(
@@ -70,7 +77,14 @@ class TestProfileKey:
         for project in ("brave-core", "bravebot"):
             config = shipped(project)
             for label in pr_labels.configured_labels(config):
+                if (project, label) in SHARED_WITH_ISSUES:
+                    continue
                 assert label.startswith("pr/"), (project, label)
+
+    def test_bravebot_shares_exactly_three_labels_with_its_issues(self):
+        names = set(pr_labels.configured_labels(shipped("bravebot")))
+        assert {label for project, label in SHARED_WITH_ISSUES} <= names
+        assert not names & {"pr/tests-only", "pr/docs-only", "pr/skills-only"}
 
     def test_no_shipped_profile_judges_a_label_that_lowers_scrutiny(self):
         for project in ("brave-core", "bravebot"):
@@ -199,7 +213,7 @@ class TestShippedBraveCore:
 class TestShippedBravebot:
     def test_a_doc_alone_is_docs_only(self, bravebot):
         assert labels_for(bravebot, "README.md", "docs/development/commits.md") == [
-            "pr/docs-only"
+            "docs-only"
         ]
 
     def test_a_spec_is_behaviour_and_not_docs_only(self, bravebot):
@@ -210,14 +224,43 @@ class TestShippedBravebot:
             "docs/best_practices.md",
             "docs/development/reviewing-for-the-rule.md",
         ):
-            assert "pr/docs-only" not in labels_for(bravebot, "README.md", path), path
+            assert "docs-only" not in labels_for(bravebot, "README.md", path), path
 
     def test_an_agent_instruction_file_is_not_docs_only(self, bravebot):
         for path in ("AGENTS.md", ".claude/CLAUDE.md", "agents/skills/x/SKILL.md"):
-            assert "pr/docs-only" not in labels_for(bravebot, path), path
+            assert "docs-only" not in labels_for(bravebot, path), path
 
     def test_an_integration_test_alone_is_tests_only(self, bravebot):
-        assert labels_for(bravebot, "crates/net/tests/proxy.rs") == ["pr/tests-only"]
+        assert labels_for(bravebot, "crates/net/tests/proxy.rs") == ["tests-only"]
+
+    def test_a_skill_alone_is_skills_only(self, bravebot):
+        assert labels_for(
+            bravebot, "agents/skills/triage-issues/SKILL.md", "agents/skills/x/y.py"
+        ) == ["skills-only"]
+
+    def test_a_skills_selftest_is_skills_only(self, bravebot):
+        assert labels_for(bravebot, "agents/skills/pr-fix/selftest.py") == [
+            "skills-only"
+        ]
+
+    def test_a_skill_beside_anything_else_is_not_skills_only(self, bravebot):
+        for other in (
+            "agents/agents/issue-poster.md",
+            "agents/AGENTS.md",
+            "docs/development/labelling-issues.md",
+            "Makefile",
+            "crates/net/tests/proxy.rs",
+        ):
+            assert "skills-only" not in labels_for(
+                bravebot, "agents/skills/x/SKILL.md", other
+            ), other
+
+    def test_a_skill_file_is_never_docs_only(self, bravebot):
+        assert "docs-only" not in labels_for(bravebot, "agents/skills/x/SKILL.md")
+
+    def test_a_test_beside_a_doc_is_neither_tests_only_nor_docs_only(self, bravebot):
+        got = labels_for(bravebot, "crates/net/tests/proxy.rs", "README.md")
+        assert "tests-only" not in got and "docs-only" not in got
 
     def test_the_ui_and_npm_lockfiles_are_dependency_risk(self, bravebot):
         for path in ("ui/pnpm-lock.yaml", "ui/package.json", "package-lock.json"):

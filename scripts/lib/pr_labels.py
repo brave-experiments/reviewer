@@ -3,7 +3,7 @@
 The labels say which review a PR needs. Two kinds, both named in the project
 profile (`review.labelPrs`, see `load_config.review_label_prs`):
 
-- decided: from the changed paths alone, with no model. `pr/tests-only` is a rule
+- decided: from the changed paths alone, with no model. `tests-only` is a rule
   about file names.
 - judged: by one subagent reading the diff, for labels no path can decide, such
   as `pr/risk/network-calls`.
