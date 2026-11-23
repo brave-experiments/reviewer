@@ -7,7 +7,7 @@
     "labelPrs": {
       "rules": [
         {
-          "label": "pr/tests-only",
+          "label": "tests-only",
           "only": [
             "*_tests.rs",
             "*/testutil.rs",
@@ -19,7 +19,7 @@
           ]
         },
         {
-          "label": "pr/docs-only",
+          "label": "docs-only",
           "only": [
             "*.md"
           ],
@@ -30,6 +30,12 @@
             ".claude/*",
             "docs/best_*.md",
             "docs/development/reviewing-for-the-rule.md"
+          ]
+        },
+        {
+          "label": "skills-only",
+          "only": [
+            "agents/skills/*"
           ]
         },
         {
